@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export GO111MODULE = on
+export GOPROXY = https://proxy.golang.org
+export GOFLAGS = -mod=vendor
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	go build -o talis-agent cmd/agent/main.go
+
+override_dh_auto_install:
+	install -D -m 0755 talis-agent debian/talis-agent/usr/bin/talis-agent
+	install -D -m 0644 config.yaml debian/talis-agent/etc/talis-agent/config.yaml
+	install -D -m 0644 debian/talis-agent.service debian/talis-agent/lib/systemd/system/talis-agent.service 

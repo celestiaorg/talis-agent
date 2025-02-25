@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/celestiaorg/talis-agent/internal/logging"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
@@ -65,6 +66,9 @@ type Collector struct {
 
 // NewCollector creates a new metrics collector
 func NewCollector(interval time.Duration) *Collector {
+	logging.Debug().
+		Str("interval", interval.String()).
+		Msg("Creating new metrics collector")
 	return &Collector{
 		interval: interval,
 	}
@@ -80,28 +84,40 @@ func (c *Collector) Collect() (*SystemMetrics, error) {
 
 	// Collect CPU metrics
 	if err = c.collectCPU(&metrics.CPU); err != nil {
+		logging.Error().Err(err).Msg("Failed to collect CPU metrics")
 		return nil, fmt.Errorf("failed to collect CPU metrics: %w", err)
 	}
 
 	// Collect memory metrics
 	if err = c.collectMemory(&metrics.Memory); err != nil {
+		logging.Error().Err(err).Msg("Failed to collect memory metrics")
 		return nil, fmt.Errorf("failed to collect memory metrics: %w", err)
 	}
 
 	// Collect disk metrics
 	if err = c.collectDisk(&metrics.Disk); err != nil {
+		logging.Error().Err(err).Msg("Failed to collect disk metrics")
 		return nil, fmt.Errorf("failed to collect disk metrics: %w", err)
 	}
 
 	// Collect network metrics
 	if err = c.collectNetwork(&metrics.Network); err != nil {
+		logging.Error().Err(err).Msg("Failed to collect network metrics")
 		return nil, fmt.Errorf("failed to collect network metrics: %w", err)
 	}
 
 	// Collect host info
 	if err = c.collectHostInfo(&metrics.HostInfo); err != nil {
+		logging.Error().Err(err).Msg("Failed to collect host info")
 		return nil, fmt.Errorf("failed to collect host info: %w", err)
 	}
+
+	logging.Debug().
+		Float64("cpu_usage", metrics.CPU.UsagePercent).
+		Float64("memory_usage", metrics.Memory.UsedPercent).
+		Float64("disk_usage", metrics.Disk.UsedPercent).
+		Int("network_interfaces", len(metrics.Network.Interfaces)).
+		Msg("System metrics collected")
 
 	return metrics, nil
 }
@@ -120,6 +136,12 @@ func (c *Collector) collectCPU(metrics *CPUMetrics) error {
 		return err
 	}
 	metrics.PerCPU = perCPU
+
+	logging.Debug().
+		Float64("total_usage", metrics.UsagePercent).
+		Int("cpu_count", len(metrics.PerCPU)).
+		Msg("CPU metrics collected")
+
 	return nil
 }
 
@@ -133,6 +155,14 @@ func (c *Collector) collectMemory(metrics *MemoryMetrics) error {
 	metrics.Used = v.Used
 	metrics.Free = v.Free
 	metrics.UsedPercent = v.UsedPercent
+
+	logging.Debug().
+		Uint64("total", metrics.Total).
+		Uint64("used", metrics.Used).
+		Uint64("free", metrics.Free).
+		Float64("used_percent", metrics.UsedPercent).
+		Msg("Memory metrics collected")
+
 	return nil
 }
 
@@ -163,6 +193,15 @@ func (c *Collector) collectDisk(metrics *DiskMetrics) error {
 		return err
 	}
 	metrics.IOCounters = ioCounters
+
+	logging.Debug().
+		Uint64("total", metrics.Total).
+		Uint64("used", metrics.Used).
+		Uint64("free", metrics.Free).
+		Float64("used_percent", metrics.UsedPercent).
+		Int("io_counters", len(metrics.IOCounters)).
+		Msg("Disk metrics collected")
+
 	return nil
 }
 
@@ -187,6 +226,11 @@ func (c *Collector) collectNetwork(metrics *NetMetrics) error {
 		metrics.IOCounters[counter.Name] = counter
 	}
 
+	logging.Debug().
+		Int("interfaces", len(metrics.Interfaces)).
+		Int("io_counters", len(metrics.IOCounters)).
+		Msg("Network metrics collected")
+
 	return nil
 }
 
@@ -200,5 +244,13 @@ func (c *Collector) collectHostInfo(info *HostInfo) error {
 	info.OS = hostInfo.OS
 	info.Platform = hostInfo.Platform
 	info.Uptime = hostInfo.Uptime
+
+	logging.Debug().
+		Str("hostname", info.Hostname).
+		Str("os", info.OS).
+		Str("platform", info.Platform).
+		Uint64("uptime", info.Uptime).
+		Msg("Host info collected")
+
 	return nil
 }

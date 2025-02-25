@@ -1,43 +1,44 @@
 package metrics
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"time"
 
+	"github.com/celestiaorg/talis-agent/internal/api"
 	"github.com/celestiaorg/talis-agent/internal/config"
+	"github.com/celestiaorg/talis-agent/internal/logging"
+	"golang.org/x/time/rate"
 )
 
 // TelemetryClient handles sending metrics to the API server
 type TelemetryClient struct {
-	config     *config.Config
-	collector  *Collector
-	httpClient *http.Client
-	startTime  time.Time
+	config    *config.Config
+	collector *Collector
+	apiClient *api.Client
+	startTime time.Time
 }
 
 // NewTelemetryClient creates a new telemetry client
 func NewTelemetryClient(cfg *config.Config) *TelemetryClient {
+	// Create API client with circuit breaker and rate limiting
+	apiClient := api.NewClient(api.ClientConfig{
+		BaseURL:          cfg.APIServer,
+		Token:            cfg.Token,
+		RequestTimeout:   10 * time.Second,
+		MaxRetries:       3,
+		RetryDelay:       time.Second,
+		RateLimit:        rate.Limit(20), // 20 requests per second
+		BurstLimit:       5,              // Allow bursts of 5 requests
+		FailureThreshold: 5,              // Open circuit after 5 failures
+		ResetTimeout:     30 * time.Second,
+	})
+
 	return &TelemetryClient{
 		config:    cfg,
 		collector: NewCollector(cfg.Metrics.CollectionInterval),
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{
-					Timeout:   5 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   5 * time.Second,
-				ResponseHeaderTimeout: 5 * time.Second,
-			},
-		},
+		apiClient: apiClient,
 		startTime: time.Now(),
 	}
 }
@@ -66,71 +67,59 @@ func (t *TelemetryClient) Start(ctx context.Context) error {
 
 	promMetrics := GetPrometheusMetrics()
 
+	logging.Info().
+		Str("metrics_interval", t.config.Metrics.CollectionInterval.String()).
+		Str("checkin_interval", t.config.CheckinInterval.String()).
+		Msg("Starting telemetry collection")
+
 	for {
 		select {
 		case <-ctx.Done():
+			logging.Info().Msg("Stopping telemetry collection")
 			return ctx.Err()
 		case <-metricsTicker.C:
 			metrics, err := t.collector.Collect()
 			if err != nil {
-				fmt.Printf("Failed to collect metrics: %v\n", err)
+				logging.Error().Err(err).Msg("Failed to collect metrics")
 				continue
 			}
 
 			// Update Prometheus metrics
 			promMetrics.UpdateSystemMetrics(metrics)
 
-			if err := t.sendMetrics(); err != nil {
-				fmt.Printf("Failed to send metrics: %v\n", err)
+			logging.Debug().
+				Float64("cpu_usage", metrics.CPU.UsagePercent).
+				Float64("memory_usage", metrics.Memory.UsedPercent).
+				Float64("disk_usage", metrics.Disk.UsedPercent).
+				Msg("System metrics collected")
+
+			if err := t.sendMetrics(ctx, metrics); err != nil {
+				logging.Error().Err(err).Msg("Failed to send metrics")
 			}
 		case <-checkinTicker.C:
-			if err := t.sendCheckin(); err != nil {
-				fmt.Printf("Failed to send check-in: %v\n", err)
+			if err := t.sendCheckin(ctx); err != nil {
+				logging.Error().Err(err).Msg("Failed to send check-in")
 			} else {
 				promMetrics.RecordCheckin(float64(time.Now().Unix()))
+				logging.Debug().Msg("Check-in sent successfully")
 			}
 		case <-uptimeTicker.C:
-			promMetrics.RecordUptime(1) // Record 1 second of uptime
+			promMetrics.RecordUptime(1)
 		}
 	}
 }
 
-// sendMetrics collects and sends metrics to the API server
-func (t *TelemetryClient) sendMetrics() error {
-	metrics, err := t.collector.Collect()
-	if err != nil {
-		return fmt.Errorf("failed to collect metrics: %w", err)
-	}
-
-	data, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metrics: %w", err)
-	}
-
-	url := fmt.Sprintf("%s%s", t.config.APIServer, t.config.Metrics.Endpoints.Telemetry)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", t.config.Token))
-
-	resp, err := t.httpClient.Do(req)
+// sendMetrics sends metrics to the API server
+func (t *TelemetryClient) sendMetrics(ctx context.Context, metrics *SystemMetrics) error {
+	_, err := t.apiClient.Request(ctx, "POST", t.config.Metrics.Endpoints.Telemetry, metrics)
 	if err != nil {
 		return fmt.Errorf("failed to send metrics: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
 	return nil
 }
 
 // sendCheckin sends a check-in request to the API server
-func (t *TelemetryClient) sendCheckin() error {
+func (t *TelemetryClient) sendCheckin(ctx context.Context) error {
 	// Get the IP address
 	ip, err := t.getOutboundIP()
 	if err != nil {
@@ -144,28 +133,9 @@ func (t *TelemetryClient) sendCheckin() error {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal check-in payload: %w", err)
-	}
-
-	url := fmt.Sprintf("%s%s", t.config.APIServer, t.config.Metrics.Endpoints.Checkin)
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", t.config.Token))
-
-	resp, err := t.httpClient.Do(req)
+	_, err = t.apiClient.Request(ctx, "POST", t.config.Metrics.Endpoints.Checkin, payload)
 	if err != nil {
 		return fmt.Errorf("failed to send check-in: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	return nil

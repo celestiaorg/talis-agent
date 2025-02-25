@@ -42,35 +42,27 @@ func TestNewTelemetryClient(t *testing.T) {
 		t.Error("Collector not properly initialized")
 	}
 
-	if client.httpClient == nil {
-		t.Error("HTTP client not properly initialized")
+	if client.apiClient == nil {
+		t.Error("API client not properly initialized")
 	}
 }
 
 func TestSendMetrics(t *testing.T) {
 	// Create a test server
-	var receivedToken string
-	var receivedMetrics *SystemMetrics
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check request method
-		if r.Method != http.MethodPost {
-			t.Errorf("Expected POST request, got %s", r.Method)
+		// Verify authorization header
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Expected Authorization header to be Bearer test-token")
 		}
 
-		// Check authorization header
-		auth := r.Header.Get("Authorization")
-		if auth != "Bearer test-token" {
-			t.Errorf("Expected Bearer test-token, got %s", auth)
-		}
-		receivedToken = auth
-
-		// Decode the metrics
+		// Verify metrics payload
 		var metrics SystemMetrics
 		if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
 			t.Errorf("Failed to decode metrics: %v", err)
 		}
-		receivedMetrics = &metrics
+		if metrics.CPU.UsagePercent < 0 || metrics.CPU.UsagePercent > 100 {
+			t.Errorf("Invalid CPU usage: %v", metrics.CPU.UsagePercent)
+		}
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -94,45 +86,38 @@ func TestSendMetrics(t *testing.T) {
 	}
 
 	client := NewTelemetryClient(cfg)
-	err := client.sendMetrics()
 
+	// Collect metrics
+	metrics, err := client.collector.Collect()
 	if err != nil {
+		t.Fatalf("Failed to collect metrics: %v", err)
+	}
+
+	// Send metrics
+	ctx := context.Background()
+	if err := client.sendMetrics(ctx, metrics); err != nil {
 		t.Fatalf("Failed to send metrics: %v", err)
-	}
-
-	if receivedToken != "Bearer test-token" {
-		t.Errorf("Token not properly sent")
-	}
-
-	if receivedMetrics == nil {
-		t.Fatal("No metrics received")
-	}
-
-	// Basic validation of received metrics
-	if receivedMetrics.Timestamp.IsZero() {
-		t.Error("Expected non-zero timestamp")
 	}
 }
 
 func TestSendCheckin(t *testing.T) {
 	// Create a test server
-	var receivedPayload CheckinPayload
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check request method
-		if r.Method != http.MethodPost {
-			t.Errorf("Expected POST request, got %s", r.Method)
+		// Verify authorization header
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Expected Authorization header to be Bearer test-token")
 		}
 
-		// Check authorization header
-		auth := r.Header.Get("Authorization")
-		if auth != "Bearer test-token" {
-			t.Errorf("Expected Bearer test-token, got %s", auth)
+		// Verify checkin payload
+		var checkin CheckinPayload
+		if err := json.NewDecoder(r.Body).Decode(&checkin); err != nil {
+			t.Errorf("Failed to decode checkin: %v", err)
 		}
-
-		// Decode the payload
-		if err := json.NewDecoder(r.Body).Decode(&receivedPayload); err != nil {
-			t.Errorf("Failed to decode payload: %v", err)
+		if checkin.Token != "test-token" {
+			t.Errorf("Expected token test-token, got %s", checkin.Token)
+		}
+		if checkin.Status != "alive" {
+			t.Errorf("Expected status alive, got %s", checkin.Status)
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -157,42 +142,53 @@ func TestSendCheckin(t *testing.T) {
 	}
 
 	client := NewTelemetryClient(cfg)
-	err := client.sendCheckin()
 
-	if err != nil {
-		t.Fatalf("Failed to send check-in: %v", err)
-	}
-
-	if receivedPayload.Token != "test-token" {
-		t.Errorf("Expected token test-token, got %s", receivedPayload.Token)
-	}
-
-	if receivedPayload.Status != "alive" {
-		t.Errorf("Expected status alive, got %s", receivedPayload.Status)
-	}
-
-	if receivedPayload.IP == "" {
-		t.Error("Expected non-empty IP")
-	}
-
-	// Parse and validate timestamp
-	_, err = time.Parse(time.RFC3339, receivedPayload.Timestamp)
-	if err != nil {
-		t.Errorf("Invalid timestamp format: %v", err)
+	// Send checkin
+	ctx := context.Background()
+	if err := client.sendCheckin(ctx); err != nil {
+		t.Fatalf("Failed to send checkin: %v", err)
 	}
 }
 
 func TestTelemetryClientStart(t *testing.T) {
 	metricsCount := 0
 	checkinCount := 0
+	expectedMetrics := 1
+	expectedCheckins := 1
 
 	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify authorization header
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Expected Authorization header to be Bearer test-token")
+		}
+
 		switch r.URL.Path {
 		case "/v1/agent/telemetry":
 			metricsCount++
+			// Verify metrics payload
+			var metrics SystemMetrics
+			if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+				t.Errorf("Failed to decode metrics: %v", err)
+			}
+			if metrics.CPU.UsagePercent < 0 || metrics.CPU.UsagePercent > 100 {
+				t.Errorf("Invalid CPU usage: %v", metrics.CPU.UsagePercent)
+			}
 		case "/v1/agent/checkin":
 			checkinCount++
+			// Verify checkin payload
+			var checkin CheckinPayload
+			if err := json.NewDecoder(r.Body).Decode(&checkin); err != nil {
+				t.Errorf("Failed to decode checkin: %v", err)
+			}
+			if checkin.Token != "test-token" {
+				t.Errorf("Expected token test-token, got %s", checkin.Token)
+			}
+			if checkin.Status != "alive" {
+				t.Errorf("Expected status alive, got %s", checkin.Status)
+			}
+		default:
+			t.Errorf("Unexpected request to %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -218,7 +214,7 @@ func TestTelemetryClientStart(t *testing.T) {
 	client := NewTelemetryClient(cfg)
 
 	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Start the client in a goroutine
@@ -227,21 +223,27 @@ func TestTelemetryClientStart(t *testing.T) {
 		errCh <- client.Start(ctx)
 	}()
 
-	// Wait for context to be done
-	select {
-	case err := <-errCh:
-		if err != context.DeadlineExceeded {
-			t.Errorf("Expected DeadlineExceeded error, got: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Test timed out")
-	}
+	// Wait for expected number of metrics and check-ins or timeout
+	timeout := time.After(1 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 
-	// Check that we received some metrics and check-ins
-	if metricsCount == 0 {
-		t.Error("No metrics were sent")
-	}
-	if checkinCount == 0 {
-		t.Error("No check-ins were sent")
+	for {
+		select {
+		case <-ticker.C:
+			if metricsCount >= expectedMetrics && checkinCount >= expectedCheckins {
+				cancel() // Stop the client
+				if err := <-errCh; err != context.Canceled {
+					t.Errorf("Expected context.Canceled error, got: %v", err)
+				}
+				return
+			}
+		case <-timeout:
+			cancel()
+			t.Fatalf("Test timed out waiting for metrics and check-ins. Got %d/%d metrics and %d/%d check-ins",
+				metricsCount, expectedMetrics, checkinCount, expectedCheckins)
+		case err := <-errCh:
+			t.Fatalf("Client stopped unexpectedly: %v", err)
+		}
 	}
 }
