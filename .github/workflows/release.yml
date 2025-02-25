@@ -24,7 +24,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev debhelper fakeroot
+          sudo apt-get install -y dpkg-dev debhelper fakeroot golang-go
 
       - name: Get version from tag
         id: get_version
