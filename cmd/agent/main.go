@@ -6,9 +6,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/celestiaorg/talis-agent/internal/config"
+	"github.com/celestiaorg/talis-agent/internal/http"
 	"github.com/celestiaorg/talis-agent/internal/metrics"
 )
 
@@ -32,17 +34,30 @@ func main() {
 	log.Printf("API Server: %s", cfg.APIServer)
 	log.Printf("HTTP Port: %d", cfg.HTTPPort)
 
-	// Create telemetry client
-	telemetryClient := metrics.NewTelemetryClient(cfg)
-
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start telemetry client in a goroutine
+	// Create wait group for goroutines
+	var wg sync.WaitGroup
+
+	// Create and start telemetry client
+	telemetryClient := metrics.NewTelemetryClient(cfg)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := telemetryClient.Start(ctx); err != nil && err != context.Canceled {
 			log.Printf("Telemetry client error: %v", err)
+		}
+	}()
+
+	// Create and start HTTP server
+	server := http.NewServer(cfg)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Start(); err != nil {
+			log.Printf("HTTP server error: %v", err)
 		}
 	}()
 
@@ -56,4 +71,8 @@ func main() {
 
 	// Cancel context to stop telemetry client
 	cancel()
+
+	// Wait for goroutines to finish
+	wg.Wait()
+	log.Println("Shutdown complete")
 }
