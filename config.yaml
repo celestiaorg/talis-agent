@@ -1,0 +1,12 @@
+api_server: "http://localhost:8080"
+token: "your-static-token"
+checkin_interval: "5s"
+http_port: 25550
+log_level: "info"
+metrics:
+  collection_interval: "5s"
+  endpoints:
+    telemetry: "/v1/agent/telemetry"
+    checkin: "/v1/agent/checkin"
+payload:
+  path: "/etc/talis-agent/payload" 
