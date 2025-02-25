@@ -17,6 +17,7 @@ type TelemetryClient struct {
 	config     *config.Config
 	collector  *Collector
 	httpClient *http.Client
+	startTime  time.Time
 }
 
 // NewTelemetryClient creates a new telemetry client
@@ -37,6 +38,7 @@ func NewTelemetryClient(cfg *config.Config) *TelemetryClient {
 				ResponseHeaderTimeout: 5 * time.Second,
 			},
 		},
+		startTime: time.Now(),
 	}
 }
 
@@ -58,20 +60,37 @@ func (t *TelemetryClient) Start(ctx context.Context) error {
 	checkinTicker := time.NewTicker(t.config.CheckinInterval)
 	defer checkinTicker.Stop()
 
+	// Start the uptime recording loop
+	uptimeTicker := time.NewTicker(time.Second)
+	defer uptimeTicker.Stop()
+
+	promMetrics := GetPrometheusMetrics()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-metricsTicker.C:
+			metrics, err := t.collector.Collect()
+			if err != nil {
+				fmt.Printf("Failed to collect metrics: %v\n", err)
+				continue
+			}
+
+			// Update Prometheus metrics
+			promMetrics.UpdateSystemMetrics(metrics)
+
 			if err := t.sendMetrics(); err != nil {
-				// Log error but continue running
 				fmt.Printf("Failed to send metrics: %v\n", err)
 			}
 		case <-checkinTicker.C:
 			if err := t.sendCheckin(); err != nil {
-				// Log error but continue running
 				fmt.Printf("Failed to send check-in: %v\n", err)
+			} else {
+				promMetrics.RecordCheckin(float64(time.Now().Unix()))
 			}
+		case <-uptimeTicker.C:
+			promMetrics.RecordUptime(1) // Record 1 second of uptime
 		}
 	}
 }

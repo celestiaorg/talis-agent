@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 
 	"github.com/celestiaorg/talis-agent/internal/config"
+	"github.com/celestiaorg/talis-agent/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Server represents the HTTP server
@@ -31,6 +33,7 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/payload", s.handlePayload)
 	mux.HandleFunc("/commands", s.handleCommands)
+	mux.Handle("/metrics", promhttp.Handler()) // Add Prometheus metrics endpoint
 
 	// Create server with configured port
 	server := &http.Server{
@@ -73,12 +76,16 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Copy request body to file
-	if _, err := io.Copy(file, r.Body); err != nil {
+	// Copy request body to file and count bytes
+	written, err := io.Copy(file, r.Body)
+	if err != nil {
 		log.Printf("Failed to write payload: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	// Record metrics
+	metrics.GetPrometheusMetrics().RecordPayloadReceived(written)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -118,6 +125,9 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 	// Execute command
 	cmd := exec.Command("bash", "-c", req.Command)
 	output, err := cmd.CombinedOutput()
+
+	// Record metrics
+	metrics.GetPrometheusMetrics().RecordCommandExecution(err == nil)
 
 	// Prepare response
 	resp := CommandResponse{
