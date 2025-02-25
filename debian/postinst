@@ -1,0 +1,44 @@
+#!/bin/sh
+set -e
+
+# Create talis-agent user and group if they don't exist
+if ! getent group talis-agent >/dev/null; then
+    addgroup --system talis-agent
+fi
+if ! getent passwd talis-agent >/dev/null; then
+    adduser --system \
+            --disabled-login \
+            --ingroup talis-agent \
+            --no-create-home \
+            --home /var/lib/talis-agent \
+            --gecos "Talis Agent" \
+            talis-agent
+fi
+
+# Create necessary directories and set permissions
+mkdir -p /var/lib/talis-agent /var/log/talis-agent /etc/talis-agent
+chown talis-agent:talis-agent /var/lib/talis-agent /var/log/talis-agent /etc/talis-agent
+chmod 750 /var/lib/talis-agent /var/log/talis-agent
+chmod 755 /etc/talis-agent
+
+# Enable and start the service
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ]; then
+    deb-systemd-helper unmask talis-agent.service >/dev/null || true
+    if deb-systemd-helper --quiet was-enabled talis-agent.service; then
+        deb-systemd-helper enable talis-agent.service >/dev/null || true
+    else
+        deb-systemd-helper update-state talis-agent.service >/dev/null || true
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+        if [ -n "$2" ]; then
+            deb-systemd-invoke try-restart talis-agent.service >/dev/null || true
+        else
+            deb-systemd-invoke start talis-agent.service >/dev/null || true
+        fi
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0 

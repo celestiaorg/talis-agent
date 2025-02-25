@@ -1,0 +1,40 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove configuration directory
+    rm -rf /etc/talis-agent
+
+    # Remove logs and data
+    rm -rf /var/log/talis-agent
+    rm -rf /var/lib/talis-agent
+
+    # Remove user and group
+    if getent passwd talis-agent >/dev/null; then
+        deluser --quiet --system talis-agent || true
+    fi
+    if getent group talis-agent >/dev/null; then
+        delgroup --quiet --system talis-agent || true
+    fi
+fi
+
+# Clean up systemd
+if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
+if [ "$1" = "remove" ]; then
+    if [ -x "/usr/bin/deb-systemd-helper" ]; then
+        deb-systemd-helper mask talis-agent.service >/dev/null || true
+    fi
+fi
+
+if [ "$1" = "purge" ]; then
+    if [ -x "/usr/bin/deb-systemd-helper" ]; then
+        deb-systemd-helper purge talis-agent.service >/dev/null || true
+        deb-systemd-helper unmask talis-agent.service >/dev/null || true
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0 
