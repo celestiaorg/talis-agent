@@ -6,10 +6,11 @@ import (
 	"net"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/celestiaorg/talis-agent/internal/api"
 	"github.com/celestiaorg/talis-agent/internal/config"
 	"github.com/celestiaorg/talis-agent/internal/logging"
-	"golang.org/x/time/rate"
 )
 
 // TelemetryClient handles sending metrics to the API server
@@ -147,7 +148,11 @@ func (t *TelemetryClient) getOutboundIP() (net.IP, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			err = fmt.Errorf("failed to close connection: %w", closeErr)
+		}
+	}()
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP, nil

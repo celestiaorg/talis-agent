@@ -1,0 +1,24 @@
+---
+name: Approve and Merge Dependabot PRs
+on:
+  # This is needed to grant permissions for secrets because dependabot PRs are opened by bots
+  pull_request_target:
+
+jobs:
+  dependabot:
+    name: "Approve and Merge Dependabot PRs"
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: CelestiaBot Approval
+        run: gh pr review --approve "$PR_URL"
+        # Leaving out the auto merge step until we have 2 approvals enforced
+        # run: |
+        #   gh pr review --approve "$PR_URL"
+        #   gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{github.event.pull_request.html_url}}
+          GH_TOKEN: ${{secrets.PR_APPROVE_PAT_CB}} # should be used automatically by gh cli

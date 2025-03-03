@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Needed for creating releases
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
 
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.get_version.outputs.version }}
           draft: false
@@ -55,4 +55,4 @@ jobs:
         with:
           name: debian-package
           path: build/talis-agent_${{ steps.get_version.outputs.version }}_*.deb
-          retention-days: 5 
+          retention-days: 5

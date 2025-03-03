@@ -35,6 +35,7 @@ type PayloadConfig struct {
 
 // Load reads and parses the configuration file
 func Load(path string) (*Config, error) {
+	// #nosec G304 -- This is a configuration file that needs to be read from a variable path
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)

@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/celestiaorg/talis-agent/internal/logging"
 	"golang.org/x/time/rate"
+
+	"github.com/celestiaorg/talis-agent/internal/logging"
 )
 
 // CircuitBreakerState represents the state of the circuit breaker
@@ -145,7 +146,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			err = fmt.Errorf("error closing response body: %w", cerr)
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

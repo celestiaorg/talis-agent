@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/celestiaorg/talis-agent/internal/config"
 	"github.com/celestiaorg/talis-agent/internal/logging"
 	"github.com/celestiaorg/talis-agent/internal/metrics"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // ErrServerClosed is returned by the Server's Start method after a call to Shutdown
@@ -43,8 +45,9 @@ func (s *Server) Start() error {
 
 	// Create server with configured port
 	s.srv = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.HTTPPort),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%d", s.config.HTTPPort),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
 	}
 
 	logging.Info().Int("port", s.config.HTTPPort).Msg("Starting HTTP server")
@@ -86,7 +89,8 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(s.config.Payload.Path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// #nosec G301 -- This directory needs to be readable by other processes
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		logging.Error().
 			Err(err).
 			Str("directory", dir).
@@ -105,7 +109,16 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logging.Error().
+				Err(err).
+				Msg("Failed to close file")
+			if err == nil { // Only set the error if there wasn't one already
+				http.Error(w, "Failed to close file", http.StatusInternalServerError)
+			}
+		}
+	}()
 
 	// Copy request body to file and count bytes
 	written, err := io.Copy(file, r.Body)
@@ -177,6 +190,7 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 		Str("command", req.Command).
 		Msg("Executing command")
 
+	// #nosec G204 -- Command execution is a core feature of this endpoint
 	cmd := exec.Command("bash", "-c", req.Command)
 	output, err := cmd.CombinedOutput()
 

@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/celestiaorg/talis-agent/internal/logging"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
+
+	"github.com/celestiaorg/talis-agent/internal/logging"
 )
 
 // SystemMetrics represents the collected system metrics

@@ -9,4 +9,4 @@ metrics:
     telemetry: "/v1/agent/telemetry"
     checkin: "/v1/agent/checkin"
 payload:
-  path: "/etc/talis-agent/payload" 
+  path: "/etc/talis-agent/payload"

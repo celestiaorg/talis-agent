@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -87,7 +88,7 @@ func main() {
 		logging.Info().
 			Str("interval", cfg.Metrics.CollectionInterval.String()).
 			Msg("Starting telemetry client")
-		if err := telemetryClient.Start(ctx); err != nil && err != context.Canceled {
+		if err := telemetryClient.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logging.Error().Err(err).Msg("Telemetry client error")
 		}
 	}()
@@ -101,7 +102,7 @@ func main() {
 			Int("port", cfg.HTTPPort).
 			Msg("Starting HTTP server")
 		if err := server.Start(); err != nil {
-			if err != http.ErrServerClosed {
+			if errors.Is(err, http.ErrServerClosed) {
 				logging.Error().Err(err).Msg("HTTP server error")
 			}
 		}
