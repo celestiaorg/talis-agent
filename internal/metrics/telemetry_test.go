@@ -171,12 +171,6 @@ func TestTelemetryClientStart(t *testing.T) {
 
 		switch r.URL.Path {
 		case "/v1/agent/telemetry":
-			mu.Lock()
-			if metricsCount < expectedMetrics {
-				metricsCount++
-				requestWg.Done()
-			}
-			mu.Unlock()
 			// Verify metrics payload
 			var metrics SystemMetrics
 			if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
@@ -185,13 +179,14 @@ func TestTelemetryClientStart(t *testing.T) {
 			if metrics.CPU.UsagePercent < 0 || metrics.CPU.UsagePercent > 100 {
 				t.Errorf("Invalid CPU usage: %v", metrics.CPU.UsagePercent)
 			}
-		case "/v1/agent/checkin":
+			// Increment metrics count and signal completion
 			mu.Lock()
-			if checkinCount < expectedCheckins {
-				checkinCount++
+			if metricsCount < expectedMetrics {
+				metricsCount++
 				requestWg.Done()
 			}
 			mu.Unlock()
+		case "/v1/agent/checkin":
 			// Verify checkin payload
 			var checkin CheckinPayload
 			if err := json.NewDecoder(r.Body).Decode(&checkin); err != nil {
@@ -203,6 +198,13 @@ func TestTelemetryClientStart(t *testing.T) {
 			if checkin.Status != "alive" {
 				t.Errorf("Expected status alive, got %s", checkin.Status)
 			}
+			// Increment checkin count and signal completion
+			mu.Lock()
+			if checkinCount < expectedCheckins {
+				checkinCount++
+				requestWg.Done()
+			}
+			mu.Unlock()
 		default:
 			t.Errorf("Unexpected request to %s", r.URL.Path)
 		}
