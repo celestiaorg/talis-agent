@@ -114,9 +114,6 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 			logging.Error().
 				Err(err).
 				Msg("Failed to close file")
-			if err == nil { // Only set the error if there wasn't one already
-				http.Error(w, "Failed to close file", http.StatusInternalServerError)
-			}
 		}
 	}()
 

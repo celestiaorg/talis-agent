@@ -148,7 +148,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 	defer func() {
 		if cerr := resp.Body.Close(); cerr != nil {
-			err = fmt.Errorf("error closing response body: %w", cerr)
+			logging.Error().Err(cerr).Msg("error closing response body")
 		}
 	}()
 

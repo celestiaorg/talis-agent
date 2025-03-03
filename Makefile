@@ -27,7 +27,7 @@ all: lint test build
 ## build: Build the application
 build: 
 	@echo "Building $(PROJECTNAME)..."
-	$(GOBUILD) $(LDFLAGS) -o bin/$(PROJECTNAME) ./cmd/main.go
+	$(GOBUILD) $(LDFLAGS) -o bin/$(PROJECTNAME) ./cmd/agent/main.go
 .PHONY: build
 
 ## clean: Clean build artifacts

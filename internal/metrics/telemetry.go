@@ -150,7 +150,7 @@ func (t *TelemetryClient) getOutboundIP() (net.IP, error) {
 	}
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
-			err = fmt.Errorf("failed to close connection: %w", closeErr)
+			logging.Error().Err(closeErr).Msg("failed to close connection")
 		}
 	}()
 

@@ -102,7 +102,7 @@ func main() {
 			Int("port", cfg.HTTPPort).
 			Msg("Starting HTTP server")
 		if err := server.Start(); err != nil {
-			if errors.Is(err, http.ErrServerClosed) {
+			if !errors.Is(err, http.ErrServerClosed) {
 				logging.Error().Err(err).Msg("HTTP server error")
 			}
 		}
