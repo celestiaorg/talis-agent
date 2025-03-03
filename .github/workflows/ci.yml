@@ -50,6 +50,3 @@ jobs:
 
       - name: Build main application
         run: make build
-
-      - name: Build CLI
-        run: make build-cli
