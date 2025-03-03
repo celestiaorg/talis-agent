@@ -72,7 +72,7 @@ func InitLogger(cfg Config) error {
 	// Configure file output if requested
 	if cfg.File != nil {
 		// Create log directory if it doesn't exist
-		if err := os.MkdirAll(filepath.Dir(cfg.File.Path), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(cfg.File.Path), 0750); err != nil {
 			return err
 		}
 

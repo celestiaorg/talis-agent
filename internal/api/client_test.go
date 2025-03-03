@@ -60,7 +60,9 @@ func TestRequest(t *testing.T) {
 
 		// Return success response
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -104,7 +106,9 @@ func TestCircuitBreaker(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -157,7 +161,9 @@ func TestRateLimiting(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 

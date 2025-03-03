@@ -20,7 +20,11 @@ func TestHandlePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	payloadPath := filepath.Join(tmpDir, "payload")
 
@@ -73,7 +77,11 @@ func TestHandlePayload(t *testing.T) {
 			server.handlePayload(w, req)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("Failed to close response body: %v", err)
+				}
+			}()
 
 			if resp.StatusCode != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, resp.StatusCode)
@@ -90,6 +98,7 @@ func TestHandlePayload(t *testing.T) {
 				}
 			} else if tt.expectedCode == http.StatusOK {
 				// Verify payload was written correctly
+				// #nosec G304 -- This is a test file that needs to be read from a variable path
 				content, err := os.ReadFile(payloadPath)
 				if err != nil {
 					t.Fatalf("Failed to read payload file: %v", err)
@@ -165,7 +174,11 @@ func TestHandleCommands(t *testing.T) {
 			server.handleCommands(w, req)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("Failed to close response body: %v", err)
+				}
+			}()
 
 			if resp.StatusCode != tt.expectedCode {
 				t.Errorf("Expected status code %d, got %d", tt.expectedCode, resp.StatusCode)

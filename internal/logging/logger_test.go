@@ -20,7 +20,11 @@ func TestLoggerInitialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -98,7 +102,11 @@ func TestLogLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -127,7 +135,7 @@ func TestLogLevels(t *testing.T) {
 
 	// Read and verify log file
 	time.Sleep(100 * time.Millisecond) // Wait for logs to be written
-	logs, err := readLogFile(logPath)
+	logs, err := readLogFile(t, logPath)
 	if err != nil {
 		t.Fatalf("Failed to read log file: %v", err)
 	}
@@ -177,7 +185,11 @@ func TestLogRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "test.log")
 
@@ -225,7 +237,11 @@ func TestLogLevelFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	tests := []struct {
 		name          string
@@ -306,7 +322,7 @@ func TestLogLevelFiltering(t *testing.T) {
 			}
 
 			time.Sleep(100 * time.Millisecond)
-			logs, err := readLogFile(logPath)
+			logs, err := readLogFile(t, logPath)
 			if err != nil {
 				t.Fatalf("Failed to read log file: %v", err)
 			}
@@ -337,7 +353,11 @@ func TestStructuredLogging(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "structured.log")
 	config := Config{
@@ -365,7 +385,7 @@ func TestStructuredLogging(t *testing.T) {
 		Msg("structured log test")
 
 	time.Sleep(100 * time.Millisecond)
-	logs, err := readStructuredLogFile(logPath)
+	logs, err := readStructuredLogFile(t, logPath)
 	if err != nil {
 		t.Fatalf("Failed to read log file: %v", err)
 	}
@@ -399,7 +419,11 @@ func TestConcurrentLogging(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "concurrent.log")
 	config := Config{
@@ -439,7 +463,7 @@ func TestConcurrentLogging(t *testing.T) {
 	wg.Wait()
 	time.Sleep(100 * time.Millisecond)
 
-	logs, err := readLogFile(logPath)
+	logs, err := readLogFile(t, logPath)
 	if err != nil {
 		t.Fatalf("Failed to read log file: %v", err)
 	}
@@ -463,7 +487,11 @@ func TestLogFilePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	logPath := filepath.Join(tmpDir, "permissions.log")
 	config := Config{
@@ -503,12 +531,17 @@ type logEntry struct {
 	Timestamp time.Time `json:"time"`
 }
 
-func readLogFile(path string) ([]logEntry, error) {
+func readLogFile(t *testing.T, path string) ([]logEntry, error) {
+	// #nosec G304 -- This is a test file that needs to be read from a variable path
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("Failed to close file: %v", err)
+		}
+	}()
 
 	var entries []logEntry
 	scanner := bufio.NewScanner(file)
@@ -533,12 +566,17 @@ type structuredLogEntry struct {
 	Boolean   bool      `json:"boolean"`
 }
 
-func readStructuredLogFile(path string) ([]structuredLogEntry, error) {
+func readStructuredLogFile(t *testing.T, path string) ([]structuredLogEntry, error) {
+	// #nosec G304 -- This is a test file that needs to be read from a variable path
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("Failed to close file: %v", err)
+		}
+	}()
 
 	var entries []structuredLogEntry
 	scanner := bufio.NewScanner(file)
@@ -559,7 +597,11 @@ func BenchmarkLogging(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			b.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	benchmarks := []struct {
 		name    string
@@ -668,7 +710,11 @@ func BenchmarkConcurrentLogging(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			b.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	config := Config{
 		Level: "info",
@@ -725,7 +771,11 @@ func BenchmarkLogLevels(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			b.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	levels := []string{"debug", "info", "warn", "error"}
 	logFuncs := map[string]func() *zerolog.Event{
