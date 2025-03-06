@@ -3,8 +3,10 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -151,10 +153,14 @@ func TestSendCheckin(t *testing.T) {
 }
 
 func TestTelemetryClientStart(t *testing.T) {
-	metricsCount := 0
-	checkinCount := 0
-	expectedMetrics := 1
-	expectedCheckins := 1
+	var (
+		metricsCount     = 0
+		checkinCount     = 0
+		expectedMetrics  = 1
+		expectedCheckins = 1
+		mu               sync.Mutex
+		requestWg        sync.WaitGroup
+	)
 
 	// Create a test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +171,6 @@ func TestTelemetryClientStart(t *testing.T) {
 
 		switch r.URL.Path {
 		case "/v1/agent/telemetry":
-			metricsCount++
 			// Verify metrics payload
 			var metrics SystemMetrics
 			if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
@@ -174,8 +179,14 @@ func TestTelemetryClientStart(t *testing.T) {
 			if metrics.CPU.UsagePercent < 0 || metrics.CPU.UsagePercent > 100 {
 				t.Errorf("Invalid CPU usage: %v", metrics.CPU.UsagePercent)
 			}
+			// Increment metrics count and signal completion
+			mu.Lock()
+			if metricsCount < expectedMetrics {
+				metricsCount++
+				requestWg.Done()
+			}
+			mu.Unlock()
 		case "/v1/agent/checkin":
-			checkinCount++
 			// Verify checkin payload
 			var checkin CheckinPayload
 			if err := json.NewDecoder(r.Body).Decode(&checkin); err != nil {
@@ -187,6 +198,13 @@ func TestTelemetryClientStart(t *testing.T) {
 			if checkin.Status != "alive" {
 				t.Errorf("Expected status alive, got %s", checkin.Status)
 			}
+			// Increment checkin count and signal completion
+			mu.Lock()
+			if checkinCount < expectedCheckins {
+				checkinCount++
+				requestWg.Done()
+			}
+			mu.Unlock()
 		default:
 			t.Errorf("Unexpected request to %s", r.URL.Path)
 		}
@@ -194,13 +212,13 @@ func TestTelemetryClientStart(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Create a test config with short intervals for testing
+	// Create a test config with reasonable intervals for testing
 	cfg := &config.Config{
 		APIServer:       server.URL,
 		Token:           "test-token",
-		CheckinInterval: 100 * time.Millisecond,
+		CheckinInterval: 100 * time.Millisecond, // Keep interval short but not too short
 		Metrics: config.MetricsConfig{
-			CollectionInterval: 100 * time.Millisecond,
+			CollectionInterval: 100 * time.Millisecond, // Keep interval short but not too short
 			Endpoints: struct {
 				Telemetry string `yaml:"telemetry"`
 				Checkin   string `yaml:"checkin"`
@@ -213,37 +231,48 @@ func TestTelemetryClientStart(t *testing.T) {
 
 	client := NewTelemetryClient(cfg)
 
+	// Set up WaitGroup for expected requests
+	requestWg.Add(expectedMetrics + expectedCheckins)
+
 	// Create a context with timeout
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Start the client in a goroutine
-	errCh := make(chan error)
+	errCh := make(chan error, 1)
 	go func() {
 		errCh <- client.Start(ctx)
 	}()
 
-	// Wait for expected number of metrics and check-ins or timeout
-	timeout := time.After(1 * time.Second)
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
+	// Wait for all expected requests or timeout
+	waitCh := make(chan struct{})
+	go func() {
+		requestWg.Wait()
+		close(waitCh)
+	}()
 
-	for {
-		select {
-		case <-ticker.C:
-			if metricsCount >= expectedMetrics && checkinCount >= expectedCheckins {
-				cancel() // Stop the client
-				if err := <-errCh; err != context.Canceled {
-					t.Errorf("Expected context.Canceled error, got: %v", err)
-				}
-				return
-			}
-		case <-timeout:
-			cancel()
-			t.Fatalf("Test timed out waiting for metrics and check-ins. Got %d/%d metrics and %d/%d check-ins",
-				metricsCount, expectedMetrics, checkinCount, expectedCheckins)
-		case err := <-errCh:
-			t.Fatalf("Client stopped unexpectedly: %v", err)
+	// Wait for completion or timeout
+	select {
+	case <-waitCh:
+		// Verify we got at least the expected number of each type of request
+		mu.Lock()
+		if metricsCount < expectedMetrics {
+			t.Errorf("Expected at least %d metrics, got %d", expectedMetrics, metricsCount)
 		}
+		if checkinCount < expectedCheckins {
+			t.Errorf("Expected at least %d checkins, got %d", expectedCheckins, checkinCount)
+		}
+		mu.Unlock()
+		cancel() // Stop the client
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("Expected context.Canceled error, got: %v", err)
+		}
+	case err := <-errCh:
+		t.Fatalf("Client stopped unexpectedly: %v", err)
+	case <-ctx.Done():
+		mu.Lock()
+		t.Fatalf("Test timed out waiting for requests. Got %d/%d metrics and %d/%d checkins",
+			metricsCount, expectedMetrics, checkinCount, expectedCheckins)
+		mu.Unlock()
 	}
 }

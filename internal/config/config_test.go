@@ -26,7 +26,11 @@ payload:
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Errorf("Failed to remove temporary file: %v", err)
+		}
+	}()
 
 	if _, err := tmpfile.Write([]byte(configContent)); err != nil {
 		t.Fatalf("Failed to write config content: %v", err)
