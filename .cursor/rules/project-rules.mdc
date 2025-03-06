@@ -1,0 +1,132 @@
+---
+description: Apply these rules when creating the project
+globs:
+alwaysApply: true
+---
+## Project Overview
+
+*   **Type:** cursor_project_rules
+*   **Description:** You are an expert programmer tasked with creating a Go-based service called talis-api that will run on Linux servers. This service continuously monitors key system metrics (CPU, memory, disk, I/O, network) via the Prometheus client. It exposes several HTTP endpoints (/metrics, /alive, /ip, /payload, /commands) and uses a configuration file (`config.yaml`) located in `/etc/talis-agent/` to set parameters such as HTTP port (default 25550) and log level. The agent is designed for both internal DevOps use and future open-source integration.
+*   **Primary Goal:** Ensure reliable system metrics collection with robust error logging and graceful failure on configuration issues, while streamlining installation via a .deb package and supporting active branch-based development and testing.
+
+## Project Structure
+
+### Framework-Specific Routing
+
+*   **Directory Rules:**
+
+    *   **gofiber@v2:** Endpoints are registered within the main Go entrypoint (typically `main.go`) using Fiber’s route handler functions. There is no file-based routing structure; routes such as `/alive`, `/metrics`, `/ip`, `/payload`, and `/commands` are defined programmatically.
+    *   Example: In `main.go`, use `app.Get` and `app.Post` to define route handling logic for each endpoint.
+
+### Core Directories
+
+*   **Versioned Structure:**
+
+    *   **cmd/**: Contains the `main.go` entrypoint for starting the application.
+    *   **pkg/**: Houses shared libraries and utilities for metrics collection, configuration management, and logging.
+    *   **configs/**: Provides sample configuration files including `config.yaml`.
+    *   **scripts/**: Contains scripts used for setting up required directories, creating the .deb package, and other deployment tasks.
+    *   **tests/**: Includes both unit tests and integration tests to cover endpoint behaviors and error scenarios.
+
+### Key Files
+
+*   **Stack-Versioned Patterns:**
+
+    *   **main.go:** Implements the GoFiber routing, configuration loader, and integrates error handling and logging as specified in the PRD.
+    *   **/etc/talis-agent/config.yaml:** Contains configuration settings (HTTP port and log level) and is required for the service to start.
+    *   **Makefile:** Facilitates project builds and the creation of the .deb package.
+    *   **.github/workflows/deb-package.yml:** GitHub Action workflow file for automating the deb package build process on each push.
+
+## Tech Stack Rules
+
+*   **Version Enforcement:**
+
+    *   **golang@1.20:** Use modern Go practices including modules, proper error handling, and concurrency safety.
+    *   **gofiber@v2:** Must be used for HTTP routing; ensure middleware for error logging and request handling is properly configured.
+    *   **prometheus_client:** Follow standard conventions to expose system metrics in a Prometheus-compatible format.
+    *   **yaml_config:** Utilize a reliable YAML parsing library to handle configuration, with checks for file existence and validity.
+    *   **linux:** Assume a Linux environment for all system calls, file operations, and command executions.
+    *   **deb_packaging_script:** Adhere strictly to Debian packaging guidelines with appropriate scripts and dependency checks.
+
+## PRD Compliance
+
+*   **Non-Negotiable:**
+
+    *   "Talis-API is a Go-based service designed to run on Linux servers to monitor key system metrics": All endpoints (/alive, /metrics, /ip, /payload, /commands) must be implemented as described. The error logging, configuration file validations, and .deb packaging requirements outlined in the PRD are mandatory.
+
+## App Flow Integration
+
+*   **Stack-Aligned Flow:**
+
+    *   GoFiber Routing Flow → In `main.go`, register the endpoints:
+
+        *   **/alive:** Returns a JSON object with HTTP 200 OK for health checks.
+        *   **/metrics:** Exposes CPU, memory, disk, I/O, and network metrics in a Prometheus-friendly format.
+        *   **/ip:** Detects and returns public IP addresses in JSON (multiple IPs as an array; empty if none).
+        *   **/payload:** Accepts arbitrary POSTed data and writes it to `/etc/talis-agent/payload` without restrictions on type or size.
+        *   **/commands:** Pipes incoming bash commands to the system without authentication.
+
+    *   Ensure logging and configuration are initialized before endpoint registration.
+
+## Best Practices
+
+*   **golang:**
+
+    *   Employ rigorous error checking and use idiomatic error handling patterns.
+    *   Utilize the context package for managing timeouts and cancellations.
+    *   Maintain clean, modular code for ease of testing and future enhancements.
+
+*   **gofiber:**
+
+    *   Leverage built-in middleware for request logging and error recovery.
+    *   Keep route handlers lightweight by delegating complex logic to dedicated functions or packages.
+    *   Regularly update to the latest version for performance and security improvements.
+
+*   **prometheus_client:**
+
+    *   Follow standardized metric naming conventions and data types.
+    *   Ensure metrics are collected concurrently without blocking request handlers.
+    *   Optimize performance to support real-time monitoring under load.
+
+*   **yaml_config:**
+
+    *   Validate configuration data thoroughly on startup; fail fast if critical settings are missing or invalid.
+    *   Provide clear error messages and logging when configuration issues occur.
+    *   Document all configuration options in a README or similar documentation.
+
+*   **linux:**
+
+    *   Handle file system operations with proper permissions and error checks.
+    *   Ensure compatibility across different Linux distributions where the agent may be deployed.
+    *   Use safe methods for executing bash commands, even if no authentication is currently implemented.
+
+*   **deb_packaging_script:**
+
+    *   Adhere to Debian packaging standards and include necessary dependency checks.
+    *   Automate package versioning and dependency resolution using a robust script and Makefile.
+    *   Test the installation process in a clean environment to ensure reproducibility.
+
+*   **makefile:**
+
+    *   Automate building, testing (unit and integration), and packaging steps.
+    *   Define clear targets for development builds, tests, and production releases.
+    *   Integrate linting and static analysis tools into the build process.
+
+*   **github_actions:**
+
+    *   Automate the .deb package build process on every push to the repository.
+    *   Ensure that tests run successfully before triggering a packaging process.
+    *   Maintain clear and concise workflow files for reproducibility and ease of debugging.
+
+*   **cursor_configuration:**
+
+    *   Leverage real-time code suggestions and advanced IDE features provided by Cursor.
+    *   Keep configuration files and settings in sync with project requirements.
+    *   Regularly update IDE tools and extensions to maintain high code quality.
+
+## Rules
+
+*   Derive folder/file patterns **directly** from the tech stack documentation and versions provided.
+*   If using GoFiber, ensure that all endpoints are registered in the main entrypoint (`main.go`) and that directory structures follow conventional Go module layouts (e.g., cmd/, pkg/, configs/, scripts/, tests/).
+*   Never mix framework patterns: do not combine file-based routing with programmatic endpoint registration.
+*   Ensure all error handling, logging, and testing (both unit and integration) are implemented in strong compliance with the PRD and app flow requirements.
