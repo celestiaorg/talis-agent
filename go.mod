@@ -1,4 +1,4 @@
-module talis-agent
+module github.com/celestiaorg/talis-agent
 
 go 1.21
 
