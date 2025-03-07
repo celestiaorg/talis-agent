@@ -3,15 +3,18 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/gofiber/fiber/v2"
 )
 
+// IPResponse represents the response from the IP service
 type IPResponse struct {
 	IP string `json:"ip"`
 }
 
+// IPHandler handles IP address requests
 func IPHandler(c *fiber.Ctx) error {
 	// Try to get IP from ipify.org
 	resp, err := http.Get("https://api.ipify.org?format=json")
@@ -20,7 +23,11 @@ func IPHandler(c *fiber.Ctx) error {
 			"ips": []string{},
 		})
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

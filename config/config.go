@@ -10,6 +10,7 @@ import (
 // ConfigPath is the path to the configuration file
 var ConfigPath = "config.yaml"
 
+// Config represents the application configuration
 type Config struct {
 	HTTP struct {
 		Port int `yaml:"port"`
@@ -19,6 +20,7 @@ type Config struct {
 	} `yaml:"logging"`
 }
 
+// Load reads and parses the configuration file
 func Load() (*Config, error) {
 	config := &Config{}
 
