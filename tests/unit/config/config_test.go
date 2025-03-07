@@ -91,6 +91,10 @@ func TestLoadConfigMissingFile(t *testing.T) {
 	}()
 
 	// Test loading configuration
-	_, err := config.Load()
-	assert.Error(t, err)
+	cfg, err := config.Load()
+	assert.NoError(t, err)
+
+	// Verify default values are set
+	assert.Equal(t, 25550, cfg.HTTP.Port)
+	assert.Equal(t, "info", cfg.Logging.Level)
 }
