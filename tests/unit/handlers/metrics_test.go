@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"talis-agent/handlers"
+	"github.com/celestiaorg/talis-agent/handlers"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"

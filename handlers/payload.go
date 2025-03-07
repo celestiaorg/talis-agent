@@ -12,6 +12,7 @@ import (
 // PayloadDir is the directory where payloads are stored
 var PayloadDir = "/etc/talis-agent/payload"
 
+// PayloadHandler handles incoming payload requests
 func PayloadHandler(c *fiber.Ctx) error {
 	// Get the payload data
 	payload := c.Body()
@@ -26,10 +27,10 @@ func PayloadHandler(c *fiber.Ctx) error {
 	filename := fmt.Sprintf("payload_%s.txt", timestamp)
 	filepath := filepath.Join(PayloadDir, filename)
 
-	// Write the payload to file
-	if err := os.WriteFile(filepath, payload, 0644); err != nil {
+	// Write the payload to file with restricted permissions
+	if err := os.WriteFile(filepath, payload, 0600); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": fmt.Sprintf("Failed to write payload: %v", err),
+			"error": "Failed to write payload file",
 		})
 	}
 

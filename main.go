@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"talis-agent/config"
-	"talis-agent/handlers"
+	"github.com/celestiaorg/talis-agent/config"
+	"github.com/celestiaorg/talis-agent/handlers"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"

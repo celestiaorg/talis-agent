@@ -9,6 +9,7 @@ import (
 	"github.com/shirou/gopsutil/v3/net"
 )
 
+// MetricsHandler handles metrics collection and reporting
 type MetricsHandler struct {
 	registry    *prometheus.Registry
 	cpuUsage    prometheus.Gauge
@@ -32,6 +33,7 @@ type MetricsHandler struct {
 	networkErrorsSent    prometheus.Gauge
 }
 
+// NewMetricsHandler creates a new metrics handler instance
 func NewMetricsHandler() *MetricsHandler {
 	registry := prometheus.NewRegistry()
 
@@ -149,6 +151,7 @@ func NewMetricsHandler() *MetricsHandler {
 	}
 }
 
+// Handle processes metrics requests
 func (h *MetricsHandler) Handle(c *fiber.Ctx) error {
 	// Update existing metrics
 	var m runtime.MemStats

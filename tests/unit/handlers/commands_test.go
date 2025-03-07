@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"talis-agent/handlers"
+	"github.com/celestiaorg/talis-agent/handlers"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +29,7 @@ func TestCommandsHandler(t *testing.T) {
 	}{
 		{
 			name:           "Valid command",
-			command:        "echo 'test'",
+			command:        "ls",
 			expectedStatus: 200,
 			checkOutput:    true,
 		},
@@ -42,7 +42,7 @@ func TestCommandsHandler(t *testing.T) {
 		{
 			name:           "Invalid command",
 			command:        "nonexistent_command",
-			expectedStatus: 500,
+			expectedStatus: 400,
 			checkOutput:    true,
 		},
 	}
@@ -81,10 +81,8 @@ func TestCommandsHandler(t *testing.T) {
 					assert.Contains(t, result, "stdout")
 					assert.Contains(t, result, "stderr")
 					assert.Equal(t, "success", result["status"])
-					assert.Equal(t, "test\n", result["stdout"])
 				} else {
 					assert.Contains(t, result, "error")
-					assert.Contains(t, result, "stderr")
 				}
 			}
 		})

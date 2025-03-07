@@ -1,4 +1,4 @@
 http:
   port: 25550
 logging:
-  level: info 
+  level: info

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"talis-agent/config"
+	"github.com/celestiaorg/talis-agent/config"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -15,7 +15,11 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Logf("Error removing temporary file: %v", err)
+		}
+	}()
 
 	// Write test configuration
 	configContent := `
@@ -50,7 +54,11 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Logf("Error removing temporary file: %v", err)
+		}
+	}()
 
 	// Write minimal configuration
 	configContent := `{}`
@@ -83,6 +91,10 @@ func TestLoadConfigMissingFile(t *testing.T) {
 	}()
 
 	// Test loading configuration
-	_, err := config.Load()
-	assert.Error(t, err)
+	cfg, err := config.Load()
+	assert.NoError(t, err)
+
+	// Verify default values are set
+	assert.Equal(t, 25550, cfg.HTTP.Port)
+	assert.Equal(t, "info", cfg.Logging.Level)
 }

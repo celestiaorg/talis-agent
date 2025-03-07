@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"talis-agent/handlers"
+	"github.com/celestiaorg/talis-agent/handlers"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +21,11 @@ func TestPayloadHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("Error removing temporary directory: %v", err)
+		}
+	}()
 
 	// Temporarily override the payload directory
 	originalPayloadDir := handlers.PayloadDir
@@ -89,7 +93,8 @@ func TestPayloadHandler(t *testing.T) {
 				assert.NoError(t, err)
 
 				// Verify file contents
-				content, err := os.ReadFile(filePath)
+				safePath := filepath.Clean(filePath)
+				content, err := os.ReadFile(safePath)
 				assert.NoError(t, err)
 				assert.Equal(t, tt.payload, string(content))
 			}
