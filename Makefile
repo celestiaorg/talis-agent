@@ -86,3 +86,10 @@ install-hooks:
 	@echo "Installing git hooks..."
 	@git config core.hooksPath .githooks
 .PHONY: install-hooks
+
+## deb: Build Debian package
+deb: build
+	@echo "Building Debian package..."
+	@mkdir -p dist
+	@./scripts/build-deb.sh
+.PHONY: deb
