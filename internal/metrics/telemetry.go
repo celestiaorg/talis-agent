@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 
 	"github.com/celestiaorg/talis-agent/internal/api"
@@ -16,7 +17,7 @@ import (
 // TelemetryClient handles sending metrics to the API server
 type TelemetryClient struct {
 	config    *config.Config
-	collector *Collector
+	collector prometheus.Collector
 	apiClient *api.Client
 	startTime time.Time
 }
@@ -25,8 +26,6 @@ type TelemetryClient struct {
 func NewTelemetryClient(cfg *config.Config) *TelemetryClient {
 	// Create API client with circuit breaker and rate limiting
 	apiClient := api.NewClient(api.ClientConfig{
-		BaseURL:          cfg.APIServer,
-		Token:            cfg.Token,
 		RequestTimeout:   10 * time.Second,
 		MaxRetries:       3,
 		RetryDelay:       time.Second,
@@ -38,7 +37,7 @@ func NewTelemetryClient(cfg *config.Config) *TelemetryClient {
 
 	return &TelemetryClient{
 		config:    cfg,
-		collector: NewCollector(cfg.Metrics.CollectionInterval),
+		collector: prometheus.NewRegistry(),
 		apiClient: apiClient,
 		startTime: time.Now(),
 	}
@@ -54,23 +53,26 @@ type CheckinPayload struct {
 
 // Start begins the telemetry collection and transmission loop
 func (t *TelemetryClient) Start(ctx context.Context) error {
+	// Parse intervals
+	metricsInterval, err := time.ParseDuration(t.config.Metrics.CollectionInterval)
+	if err != nil {
+		metricsInterval = 15 * time.Second // Default interval
+	}
+
 	// Start the metrics collection loop
-	metricsTicker := time.NewTicker(t.config.Metrics.CollectionInterval)
+	metricsTicker := time.NewTicker(metricsInterval)
 	defer metricsTicker.Stop()
 
-	// Start the check-in loop
-	checkinTicker := time.NewTicker(t.config.CheckinInterval)
+	// Start the check-in loop with fixed 1-minute interval
+	checkinTicker := time.NewTicker(time.Minute)
 	defer checkinTicker.Stop()
 
 	// Start the uptime recording loop
 	uptimeTicker := time.NewTicker(time.Second)
 	defer uptimeTicker.Stop()
 
-	promMetrics := GetPrometheusMetrics()
-
 	logging.Info().
-		Str("metrics_interval", t.config.Metrics.CollectionInterval.String()).
-		Str("checkin_interval", t.config.CheckinInterval.String()).
+		Str("metrics_interval", metricsInterval.String()).
 		Msg("Starting telemetry collection")
 
 	for {
@@ -79,40 +81,33 @@ func (t *TelemetryClient) Start(ctx context.Context) error {
 			logging.Info().Msg("Stopping telemetry collection")
 			return ctx.Err()
 		case <-metricsTicker.C:
-			metrics, err := t.collector.Collect()
-			if err != nil {
-				logging.Error().Err(err).Msg("Failed to collect metrics")
-				continue
+			ch := make(chan prometheus.Metric, 100)
+			t.collector.Collect(ch)
+			close(ch)
+
+			// Process collected metrics
+			for metric := range ch {
+				if err := t.sendMetrics(ctx, metric); err != nil {
+					logging.Error().Err(err).Msg("Failed to send metrics")
+				}
 			}
 
-			// Update Prometheus metrics
-			promMetrics.UpdateSystemMetrics(metrics)
-
-			logging.Debug().
-				Float64("cpu_usage", metrics.CPU.UsagePercent).
-				Float64("memory_usage", metrics.Memory.UsedPercent).
-				Float64("disk_usage", metrics.Disk.UsedPercent).
-				Msg("System metrics collected")
-
-			if err := t.sendMetrics(ctx, metrics); err != nil {
-				logging.Error().Err(err).Msg("Failed to send metrics")
-			}
+			logging.Debug().Msg("Metrics collected and sent")
 		case <-checkinTicker.C:
 			if err := t.sendCheckin(ctx); err != nil {
 				logging.Error().Err(err).Msg("Failed to send check-in")
 			} else {
-				promMetrics.RecordCheckin(float64(time.Now().Unix()))
 				logging.Debug().Msg("Check-in sent successfully")
 			}
 		case <-uptimeTicker.C:
-			promMetrics.RecordUptime(1)
+			// Skip uptime recording as we're using Prometheus native metrics
 		}
 	}
 }
 
 // sendMetrics sends metrics to the API server
-func (t *TelemetryClient) sendMetrics(ctx context.Context, metrics *SystemMetrics) error {
-	_, err := t.apiClient.Request(ctx, "POST", t.config.Metrics.Endpoints.Telemetry, metrics)
+func (t *TelemetryClient) sendMetrics(ctx context.Context, metrics prometheus.Metric) error {
+	_, err := t.apiClient.Request(ctx, "POST", "/metrics", metrics)
 	if err != nil {
 		return fmt.Errorf("failed to send metrics: %w", err)
 	}
@@ -127,14 +122,12 @@ func (t *TelemetryClient) sendCheckin(ctx context.Context) error {
 		return fmt.Errorf("failed to get IP address: %w", err)
 	}
 
-	payload := CheckinPayload{
-		Token:     t.config.Token,
-		IP:        ip.String(),
+	payload := CheckinPayload{IP: ip.String(),
 		Status:    "alive",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	_, err = t.apiClient.Request(ctx, "POST", t.config.Metrics.Endpoints.Checkin, payload)
+	_, err = t.apiClient.Request(ctx, "POST", "/checkin", payload)
 	if err != nil {
 		return fmt.Errorf("failed to send check-in: %w", err)
 	}

@@ -1,0 +1,18 @@
+# Talis Agent Configuration
+
+http:
+  port: 25550          # HTTP server port
+  host: "0.0.0.0"      # Listen address
+
+logging:
+  level: info          # Log level (debug, info, warn, error)
+  format: json         # Log format (json, text)
+
+metrics:
+  collection_interval: "15s"  # Metrics collection interval
+  retention_days: 7          # Metrics retention period
+
+security:
+  tls_enabled: false   # Enable HTTPS
+  cert_file: ""        # Path to TLS certificate
+  key_file: ""         # Path to TLS private key 
