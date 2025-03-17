@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
-
-	"github.com/celestiaorg/talis-agent/internal/logging"
 )
 
 // SystemMetrics represents the collected system metrics
@@ -60,198 +59,250 @@ type HostInfo struct {
 	Uptime   uint64 `json:"uptime"`
 }
 
-// Collector handles system metrics collection
+// Collector implements prometheus.Collector interface
 type Collector struct {
 	interval time.Duration
+
+	// CPU metrics
+	cpuUsage   *prometheus.Desc
+	cpuPerCore *prometheus.Desc
+
+	// Memory metrics
+	memoryTotal   *prometheus.Desc
+	memoryUsed    *prometheus.Desc
+	memoryFree    *prometheus.Desc
+	memoryPercent *prometheus.Desc
+
+	// Disk metrics
+	diskTotal   *prometheus.Desc
+	diskUsed    *prometheus.Desc
+	diskFree    *prometheus.Desc
+	diskPercent *prometheus.Desc
+	diskIO      *prometheus.Desc
+
+	// Network metrics
+	networkIO *prometheus.Desc
+
+	// Host metrics
+	hostUptime *prometheus.Desc
 }
 
 // NewCollector creates a new metrics collector
 func NewCollector(interval time.Duration) *Collector {
-	logging.Debug().
-		Str("interval", interval.String()).
-		Msg("Creating new metrics collector")
 	return &Collector{
 		interval: interval,
+
+		// CPU metrics
+		cpuUsage: prometheus.NewDesc(
+			"system_cpu_usage_percent",
+			"Current CPU usage percentage",
+			nil, nil,
+		),
+		cpuPerCore: prometheus.NewDesc(
+			"system_cpu_core_usage_percent",
+			"CPU usage percentage per core",
+			[]string{"core"}, nil,
+		),
+
+		// Memory metrics
+		memoryTotal: prometheus.NewDesc(
+			"system_memory_total_bytes",
+			"Total memory in bytes",
+			nil, nil,
+		),
+		memoryUsed: prometheus.NewDesc(
+			"system_memory_used_bytes",
+			"Used memory in bytes",
+			nil, nil,
+		),
+		memoryFree: prometheus.NewDesc(
+			"system_memory_free_bytes",
+			"Free memory in bytes",
+			nil, nil,
+		),
+		memoryPercent: prometheus.NewDesc(
+			"system_memory_usage_percent",
+			"Memory usage percentage",
+			nil, nil,
+		),
+
+		// Disk metrics
+		diskTotal: prometheus.NewDesc(
+			"system_disk_total_bytes",
+			"Total disk space in bytes",
+			nil, nil,
+		),
+		diskUsed: prometheus.NewDesc(
+			"system_disk_used_bytes",
+			"Used disk space in bytes",
+			nil, nil,
+		),
+		diskFree: prometheus.NewDesc(
+			"system_disk_free_bytes",
+			"Free disk space in bytes",
+			nil, nil,
+		),
+		diskPercent: prometheus.NewDesc(
+			"system_disk_usage_percent",
+			"Disk usage percentage",
+			nil, nil,
+		),
+		diskIO: prometheus.NewDesc(
+			"system_disk_io_bytes",
+			"Disk I/O in bytes",
+			[]string{"device", "type"}, nil,
+		),
+
+		// Network metrics
+		networkIO: prometheus.NewDesc(
+			"system_network_io_bytes",
+			"Network I/O in bytes",
+			[]string{"interface", "direction"}, nil,
+		),
+
+		// Host metrics
+		hostUptime: prometheus.NewDesc(
+			"system_uptime_seconds",
+			"System uptime in seconds",
+			nil, nil,
+		),
 	}
 }
 
-// Collect gathers all system metrics
-func (c *Collector) Collect() (*SystemMetrics, error) {
-	metrics := &SystemMetrics{
-		Timestamp: time.Now(),
-	}
+// Describe implements prometheus.Collector
+func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.cpuUsage
+	ch <- c.cpuPerCore
+	ch <- c.memoryTotal
+	ch <- c.memoryUsed
+	ch <- c.memoryFree
+	ch <- c.memoryPercent
+	ch <- c.diskTotal
+	ch <- c.diskUsed
+	ch <- c.diskFree
+	ch <- c.diskPercent
+	ch <- c.diskIO
+	ch <- c.networkIO
+	ch <- c.hostUptime
+}
 
-	var err error
-
+// Collect implements prometheus.Collector
+func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	// Collect CPU metrics
-	if err = c.collectCPU(&metrics.CPU); err != nil {
-		logging.Error().Err(err).Msg("Failed to collect CPU metrics")
-		return nil, fmt.Errorf("failed to collect CPU metrics: %w", err)
+	if percent, err := cpu.Percent(0, false); err == nil && len(percent) > 0 {
+		ch <- prometheus.MustNewConstMetric(
+			c.cpuUsage,
+			prometheus.GaugeValue,
+			percent[0],
+		)
 	}
 
-	// Collect memory metrics
-	if err = c.collectMemory(&metrics.Memory); err != nil {
-		logging.Error().Err(err).Msg("Failed to collect memory metrics")
-		return nil, fmt.Errorf("failed to collect memory metrics: %w", err)
-	}
-
-	// Collect disk metrics
-	if err = c.collectDisk(&metrics.Disk); err != nil {
-		logging.Error().Err(err).Msg("Failed to collect disk metrics")
-		return nil, fmt.Errorf("failed to collect disk metrics: %w", err)
-	}
-
-	// Collect network metrics
-	if err = c.collectNetwork(&metrics.Network); err != nil {
-		logging.Error().Err(err).Msg("Failed to collect network metrics")
-		return nil, fmt.Errorf("failed to collect network metrics: %w", err)
-	}
-
-	// Collect host info
-	if err = c.collectHostInfo(&metrics.HostInfo); err != nil {
-		logging.Error().Err(err).Msg("Failed to collect host info")
-		return nil, fmt.Errorf("failed to collect host info: %w", err)
-	}
-
-	logging.Debug().
-		Float64("cpu_usage", metrics.CPU.UsagePercent).
-		Float64("memory_usage", metrics.Memory.UsedPercent).
-		Float64("disk_usage", metrics.Disk.UsedPercent).
-		Int("network_interfaces", len(metrics.Network.Interfaces)).
-		Msg("System metrics collected")
-
-	return metrics, nil
-}
-
-func (c *Collector) collectCPU(metrics *CPUMetrics) error {
-	percent, err := cpu.Percent(c.interval, false)
-	if err != nil {
-		return err
-	}
-	if len(percent) > 0 {
-		metrics.UsagePercent = percent[0]
-	}
-
-	perCPU, err := cpu.Percent(c.interval, true)
-	if err != nil {
-		return err
-	}
-	metrics.PerCPU = perCPU
-
-	logging.Debug().
-		Float64("total_usage", metrics.UsagePercent).
-		Int("cpu_count", len(metrics.PerCPU)).
-		Msg("CPU metrics collected")
-
-	return nil
-}
-
-func (c *Collector) collectMemory(metrics *MemoryMetrics) error {
-	v, err := mem.VirtualMemory()
-	if err != nil {
-		return err
-	}
-
-	metrics.Total = v.Total
-	metrics.Used = v.Used
-	metrics.Free = v.Free
-	metrics.UsedPercent = v.UsedPercent
-
-	logging.Debug().
-		Uint64("total", metrics.Total).
-		Uint64("used", metrics.Used).
-		Uint64("free", metrics.Free).
-		Float64("used_percent", metrics.UsedPercent).
-		Msg("Memory metrics collected")
-
-	return nil
-}
-
-func (c *Collector) collectDisk(metrics *DiskMetrics) error {
-	partitions, err := disk.Partitions(false)
-	if err != nil {
-		return err
-	}
-
-	// We'll use the root partition for overall disk metrics
-	for _, partition := range partitions {
-		if partition.Mountpoint == "/" {
-			usage, err := disk.Usage(partition.Mountpoint)
-			if err != nil {
-				return err
-			}
-			metrics.Total = usage.Total
-			metrics.Used = usage.Used
-			metrics.Free = usage.Free
-			metrics.UsedPercent = usage.UsedPercent
-			break
+	if perCPU, err := cpu.Percent(0, true); err == nil {
+		for i, usage := range perCPU {
+			ch <- prometheus.MustNewConstMetric(
+				c.cpuPerCore,
+				prometheus.GaugeValue,
+				usage,
+				fmt.Sprintf("%d", i),
+			)
 		}
 	}
 
-	// Collect IO counters
-	ioCounters, err := disk.IOCounters()
-	if err != nil {
-		return err
-	}
-	metrics.IOCounters = ioCounters
-
-	logging.Debug().
-		Uint64("total", metrics.Total).
-		Uint64("used", metrics.Used).
-		Uint64("free", metrics.Free).
-		Float64("used_percent", metrics.UsedPercent).
-		Int("io_counters", len(metrics.IOCounters)).
-		Msg("Disk metrics collected")
-
-	return nil
-}
-
-func (c *Collector) collectNetwork(metrics *NetMetrics) error {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return err
-	}
-
-	metrics.Interfaces = make([]string, 0, len(interfaces))
-	for _, iface := range interfaces {
-		metrics.Interfaces = append(metrics.Interfaces, iface.Name)
+	// Collect memory metrics
+	if v, err := mem.VirtualMemory(); err == nil {
+		ch <- prometheus.MustNewConstMetric(
+			c.memoryTotal,
+			prometheus.GaugeValue,
+			float64(v.Total),
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.memoryUsed,
+			prometheus.GaugeValue,
+			float64(v.Used),
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.memoryFree,
+			prometheus.GaugeValue,
+			float64(v.Free),
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.memoryPercent,
+			prometheus.GaugeValue,
+			v.UsedPercent,
+		)
 	}
 
-	ioCounters, err := net.IOCounters(true)
-	if err != nil {
-		return err
+	// Collect disk metrics
+	if partitions, err := disk.Partitions(false); err == nil {
+		for _, partition := range partitions {
+			if usage, err := disk.Usage(partition.Mountpoint); err == nil {
+				ch <- prometheus.MustNewConstMetric(
+					c.diskTotal,
+					prometheus.GaugeValue,
+					float64(usage.Total),
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.diskUsed,
+					prometheus.GaugeValue,
+					float64(usage.Used),
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.diskFree,
+					prometheus.GaugeValue,
+					float64(usage.Free),
+				)
+				ch <- prometheus.MustNewConstMetric(
+					c.diskPercent,
+					prometheus.GaugeValue,
+					usage.UsedPercent,
+				)
+				break // Only use root partition
+			}
+		}
 	}
 
-	metrics.IOCounters = make(map[string]net.IOCountersStat)
-	for _, counter := range ioCounters {
-		metrics.IOCounters[counter.Name] = counter
+	// Collect disk I/O metrics
+	if iostats, err := disk.IOCounters(); err == nil {
+		for device, stats := range iostats {
+			ch <- prometheus.MustNewConstMetric(
+				c.diskIO,
+				prometheus.GaugeValue,
+				float64(stats.ReadBytes),
+				device, "read",
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.diskIO,
+				prometheus.GaugeValue,
+				float64(stats.WriteBytes),
+				device, "write",
+			)
+		}
 	}
 
-	logging.Debug().
-		Int("interfaces", len(metrics.Interfaces)).
-		Int("io_counters", len(metrics.IOCounters)).
-		Msg("Network metrics collected")
-
-	return nil
-}
-
-func (c *Collector) collectHostInfo(info *HostInfo) error {
-	hostInfo, err := host.Info()
-	if err != nil {
-		return err
+	// Collect network metrics
+	if netStats, err := net.IOCounters(true); err == nil {
+		for _, stats := range netStats {
+			ch <- prometheus.MustNewConstMetric(
+				c.networkIO,
+				prometheus.GaugeValue,
+				float64(stats.BytesRecv),
+				stats.Name, "received",
+			)
+			ch <- prometheus.MustNewConstMetric(
+				c.networkIO,
+				prometheus.GaugeValue,
+				float64(stats.BytesSent),
+				stats.Name, "sent",
+			)
+		}
 	}
 
-	info.Hostname = hostInfo.Hostname
-	info.OS = hostInfo.OS
-	info.Platform = hostInfo.Platform
-	info.Uptime = hostInfo.Uptime
-
-	logging.Debug().
-		Str("hostname", info.Hostname).
-		Str("os", info.OS).
-		Str("platform", info.Platform).
-		Uint64("uptime", info.Uptime).
-		Msg("Host info collected")
-
-	return nil
+	// Collect host metrics
+	if hostInfo, err := host.Info(); err == nil {
+		ch <- prometheus.MustNewConstMetric(
+			c.hostUptime,
+			prometheus.GaugeValue,
+			float64(hostInfo.Uptime),
+		)
+	}
 }

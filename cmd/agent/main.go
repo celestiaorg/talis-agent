@@ -1,162 +1,101 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/celestiaorg/talis-agent/internal/config"
-	"github.com/celestiaorg/talis-agent/internal/http"
-	"github.com/celestiaorg/talis-agent/internal/logging"
+	"github.com/celestiaorg/talis-agent/internal/handlers"
 	"github.com/celestiaorg/talis-agent/internal/metrics"
 )
 
-var (
-	configPath = flag.String("config", "config.yaml", "path to configuration file")
-	logPath    = flag.String("log", "", "path to log file (default: /var/log/talis-agent/agent.log)")
-	version    = "0.1.0" // This should be set during build
-)
-
 func main() {
-	flag.Parse()
-
-	// Initialize logging with both console and file output
-	logConfig := logging.Config{
-		Level:      "info", // Default to info level
-		TimeFormat: time.RFC3339,
-		Console:    true, // Use console format for better readability during development
-		File:       logging.DefaultFileConfig(),
-	}
-
-	// Override log file path if provided via flag
-	if *logPath != "" {
-		logConfig.File.Path = *logPath
-	}
-
-	// Initialize logging
-	if err := logging.InitLogger(logConfig); err != nil {
-		// If we can't initialize logging, write to stderr and exit
-		fmt.Fprintf(os.Stderr, "Failed to initialize logging: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Load configuration
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load()
 	if err != nil {
-		logging.Fatal().Err(err).Msg("Failed to load configuration")
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Update log level from configuration
-	if cfg.LogLevel != "" {
-		logConfig.Level = cfg.LogLevel
-		if err := logging.InitLogger(logConfig); err != nil {
-			logging.Error().Err(err).Msg("Failed to update log level")
-		}
+	// Parse metrics collection interval
+	interval, err := time.ParseDuration(cfg.Metrics.CollectionInterval)
+	if err != nil {
+		interval = 15 * time.Second // Default interval
+		log.Printf("Using default metrics collection interval: %v", interval)
 	}
 
-	// Print startup information
-	logging.Info().
-		Str("version", version).
-		Str("config_path", *configPath).
-		Str("log_path", logConfig.File.Path).
-		Str("api_server", cfg.APIServer).
-		Int("http_port", cfg.HTTPPort).
-		Str("metrics_interval", cfg.Metrics.CollectionInterval.String()).
-		Msg("Starting Talis Agent")
+	// Initialize metrics collector
+	collector := metrics.NewCollector(interval)
 
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Register collector with Prometheus
+	prometheus.MustRegister(collector)
 
-	// Create wait group for goroutines
-	var wg sync.WaitGroup
+	// Create Fiber app
+	app := fiber.New(fiber.Config{
+		AppName:      "Talis Agent",
+		ReadTimeout:  time.Second * 10,
+		WriteTimeout: time.Second * 10,
+	})
 
-	// Initialize Prometheus metrics
-	promMetrics := metrics.GetPrometheusMetrics()
+	// Add middleware
+	app.Use(logger.New())
+	app.Use(recover.New())
+	app.Use(cors.New())
 
-	// Create and start telemetry client
-	telemetryClient := metrics.NewTelemetryClient(cfg)
-	wg.Add(1)
+	// Initialize handlers
+	h := handlers.NewHandler(collector)
+
+	// Setup routes
+	setupRoutes(app, h)
+
+	// Start server in a goroutine
 	go func() {
-		defer wg.Done()
-		logging.Info().
-			Str("interval", cfg.Metrics.CollectionInterval.String()).
-			Msg("Starting telemetry client")
-		if err := telemetryClient.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			logging.Error().Err(err).Msg("Telemetry client error")
-		}
-	}()
-
-	// Create and start HTTP server
-	server := http.NewServer(cfg)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		logging.Info().
-			Int("port", cfg.HTTPPort).
-			Msg("Starting HTTP server")
-		if err := server.Start(); err != nil {
-			if !errors.Is(err, http.ErrServerClosed) {
-				logging.Error().Err(err).Msg("HTTP server error")
-			}
+		addr := fmt.Sprintf("%s:%d", cfg.HTTP.Host, cfg.HTTP.Port)
+		log.Printf("Starting server on %s", addr)
+		if err := app.Listen(addr); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// Set up signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-	// Start recording uptime
-	uptimeTicker := time.NewTicker(time.Second)
-	defer uptimeTicker.Stop()
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-uptimeTicker.C:
-				promMetrics.RecordUptime(1)
-			}
-		}
-	}()
+	log.Println("Shutting down server...")
 
-	// Wait for termination signal
-	sig := <-sigChan
-	logging.Info().
-		Str("signal", sig.String()).
-		Msg("Initiating graceful shutdown")
+	// Unregister metrics collector
+	prometheus.Unregister(collector)
 
-	// Cancel context to stop all components
-	cancel()
-
-	// Create a timeout context for graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	// Shutdown HTTP server gracefully
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logging.Error().Err(err).Msg("Error during HTTP server shutdown")
+	if err := app.Shutdown(); err != nil {
+		log.Printf("Error during server shutdown: %v", err)
 	}
 
-	// Wait for all goroutines to finish with timeout
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
+	log.Println("Server gracefully stopped")
+}
 
-	select {
-	case <-done:
-		logging.Info().Msg("All components shut down successfully")
-	case <-shutdownCtx.Done():
-		logging.Warn().Msg("Shutdown timed out, forcing exit")
-	}
+func setupRoutes(app *fiber.App, h *handlers.Handler) {
+	// Health check endpoint
+	app.Get("/alive", h.HealthCheck)
 
-	logging.Info().Msg("Talis Agent stopped")
+	// Metrics endpoint
+	app.Get("/metrics", h.GetMetrics)
+
+	// IP endpoint
+	app.Get("/ip", h.GetIP)
+
+	// Payload endpoint
+	app.Post("/payload", h.HandlePayload)
+
+	// Commands endpoint
+	app.Post("/commands", h.ExecuteCommand)
 }
