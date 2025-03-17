@@ -55,9 +55,6 @@ func Load(path string) (*Config, error) {
 
 // validateConfig performs basic validation of the configuration
 func validateConfig(config *Config) error {
-	if config.APIServer == "" {
-		return fmt.Errorf("api_server is required")
-	}
 	if config.Token == "" {
 		return fmt.Errorf("token is required")
 	}
