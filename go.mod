@@ -7,8 +7,8 @@ toolchain go1.23.5
 require (
 	github.com/gofiber/fiber/v2 v2.52.0
 	github.com/prometheus/client_golang v1.21.1
-	github.com/rs/zerolog v1.33.0
-	github.com/shirou/gopsutil/v3 v3.24.1
+	github.com/rs/zerolog v1.34.0
+	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.10.0
 	github.com/valyala/fasthttp v1.51.0
 	golang.org/x/time v0.11.0
