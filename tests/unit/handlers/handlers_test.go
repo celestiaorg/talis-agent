@@ -20,8 +20,12 @@ func setupTestApp(t *testing.T) (*fiber.App, *handlers.Handler) {
 	collector := metrics.NewCollector(15 * time.Second)
 	prometheus.MustRegister(collector)
 
-	h := handlers.NewHandler(collector)
+	// Ensure collector is unregistered after the test
+	t.Cleanup(func() {
+		prometheus.Unregister(collector)
+	})
 
+	h := handlers.NewHandler(collector)
 	return app, h
 }
 
