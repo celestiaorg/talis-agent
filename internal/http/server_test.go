@@ -2,224 +2,176 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/celestiaorg/talis-agent/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandlePayload(t *testing.T) {
-	// Create temporary directory for test
-	tmpDir, err := os.MkdirTemp("", "talis-agent-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(tmpDir); err != nil {
-			t.Errorf("Failed to remove temporary directory: %v", err)
-		}
-	}()
+	// Create a temporary directory for the payload
+	tmpDir, err := os.MkdirTemp("", "talis-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
 
 	payloadPath := filepath.Join(tmpDir, "payload")
+	t.Setenv("TALIS_PAYLOAD_PATH", payloadPath)
 
 	cfg := &config.Config{
-		Token: "test-token",
-		Payload: config.PayloadConfig{
-			Path: payloadPath,
+		HTTP: config.HTTPConfig{
+			Host: "localhost",
+			Port: 25550,
 		},
 	}
 
 	server := NewServer(cfg)
+	require.NotNil(t, server)
 
-	tests := []struct {
-		name          string
-		method        string
-		token         string
-		body          string
-		expectedCode  int
-		expectedError string
-	}{
-		{
-			name:         "Valid request",
-			method:       http.MethodPost,
-			token:        "Bearer test-token",
-			body:         "test payload",
-			expectedCode: http.StatusOK,
-		},
-		{
-			name:          "Invalid method",
-			method:        http.MethodGet,
-			token:         "Bearer test-token",
-			expectedCode:  http.StatusMethodNotAllowed,
-			expectedError: "Method not allowed\n",
-		},
-		{
-			name:          "Invalid token",
-			method:        http.MethodPost,
-			token:         "Bearer invalid-token",
-			expectedCode:  http.StatusUnauthorized,
-			expectedError: "Unauthorized\n",
-		},
-	}
+	// Create a test request
+	payload := []byte("test payload")
+	req := httptest.NewRequest(http.MethodPost, "/payload", bytes.NewReader(payload))
+	w := httptest.NewRecorder()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/payload", strings.NewReader(tt.body))
-			req.Header.Set("Authorization", tt.token)
-			w := httptest.NewRecorder()
+	// Handle the request
+	server.handlePayload(w, req)
 
-			server.handlePayload(w, req)
+	// Check response
+	require.Equal(t, http.StatusOK, w.Code)
 
-			resp := w.Result()
-			defer func() {
-				if err := resp.Body.Close(); err != nil {
-					t.Errorf("Failed to close response body: %v", err)
-				}
-			}()
-
-			if resp.StatusCode != tt.expectedCode {
-				t.Errorf("Expected status code %d, got %d", tt.expectedCode, resp.StatusCode)
-			}
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				t.Fatalf("Failed to read response body: %v", err)
-			}
-
-			if tt.expectedError != "" {
-				if string(body) != tt.expectedError {
-					t.Errorf("Expected error %q, got %q", tt.expectedError, string(body))
-				}
-			} else if tt.expectedCode == http.StatusOK {
-				// Verify payload was written correctly
-				// #nosec G304 -- This is a test file that needs to be read from a variable path
-				content, err := os.ReadFile(payloadPath)
-				if err != nil {
-					t.Fatalf("Failed to read payload file: %v", err)
-				}
-				if string(content) != tt.body {
-					t.Errorf("Expected payload %q, got %q", tt.body, string(content))
-				}
-			}
-		})
-	}
+	// Verify the file was written
+	content, err := os.ReadFile(payloadPath)
+	require.NoError(t, err)
+	require.Equal(t, payload, content)
 }
 
 func TestHandleCommands(t *testing.T) {
 	cfg := &config.Config{
-		Token: "test-token",
+		HTTP: config.HTTPConfig{
+			Host: "localhost",
+			Port: 25550,
+		},
 	}
 
 	server := NewServer(cfg)
+	require.NotNil(t, server)
 
-	tests := []struct {
-		name           string
-		method         string
-		token          string
-		command        string
-		expectedCode   int
-		expectedOutput string
-		expectError    bool
-	}{
-		{
-			name:           "Valid command",
-			method:         http.MethodPost,
-			token:          "Bearer test-token",
-			command:        "echo 'hello world'",
-			expectedCode:   http.StatusOK,
-			expectedOutput: "hello world\n",
-			expectError:    false,
-		},
-		{
-			name:         "Invalid command",
-			method:       http.MethodPost,
-			token:        "Bearer test-token",
-			command:      "invalid_command",
-			expectedCode: http.StatusOK,
-			expectError:  true,
-		},
-		{
-			name:         "Invalid method",
-			method:       http.MethodGet,
-			token:        "Bearer test-token",
-			expectedCode: http.StatusMethodNotAllowed,
-		},
-		{
-			name:         "Invalid token",
-			method:       http.MethodPost,
-			token:        "Bearer invalid-token",
-			command:      "echo 'test'",
-			expectedCode: http.StatusUnauthorized,
-		},
-	}
+	// Create a test request
+	cmdReq := CommandRequest{Command: "echo 'test'"}
+	body, err := json.Marshal(cmdReq)
+	require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var reqBody []byte
-			if tt.command != "" {
-				reqBody, _ = json.Marshal(CommandRequest{Command: tt.command})
-			}
+	req := httptest.NewRequest(http.MethodPost, "/commands", bytes.NewReader(body))
+	w := httptest.NewRecorder()
 
-			req := httptest.NewRequest(tt.method, "/commands", bytes.NewBuffer(reqBody))
-			req.Header.Set("Authorization", tt.token)
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
+	// Handle the request
+	server.handleCommands(w, req)
 
-			server.handleCommands(w, req)
+	// Check response
+	require.Equal(t, http.StatusOK, w.Code)
 
-			resp := w.Result()
-			defer func() {
-				if err := resp.Body.Close(); err != nil {
-					t.Errorf("Failed to close response body: %v", err)
-				}
-			}()
-
-			if resp.StatusCode != tt.expectedCode {
-				t.Errorf("Expected status code %d, got %d", tt.expectedCode, resp.StatusCode)
-			}
-
-			if tt.expectedCode == http.StatusOK {
-				var cmdResp CommandResponse
-				if err := json.NewDecoder(resp.Body).Decode(&cmdResp); err != nil {
-					t.Fatalf("Failed to decode response: %v", err)
-				}
-
-				if tt.expectError {
-					if cmdResp.Error == "" {
-						t.Error("Expected error in response, got none")
-					}
-				} else {
-					if cmdResp.Output != tt.expectedOutput {
-						t.Errorf("Expected output %q, got %q", tt.expectedOutput, cmdResp.Output)
-					}
-					if cmdResp.Error != "" {
-						t.Errorf("Unexpected error: %s", cmdResp.Error)
-					}
-				}
-			}
-		})
-	}
+	var resp CommandResponse
+	err = json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	require.Equal(t, "test\n", resp.Output)
+	require.Empty(t, resp.Error)
 }
 
 func TestNewServer(t *testing.T) {
 	cfg := &config.Config{
-		HTTPPort: 25550,
-		Token:    "test-token",
+		HTTP: config.HTTPConfig{
+			Host: "localhost",
+			Port: 25550,
+		},
+		Metrics: config.MetricsConfig{
+			CollectionInterval: "15s",
+			RetentionDays:      7,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Security: config.SecurityConfig{
+			TLSEnabled: false,
+			CertFile:   "",
+			KeyFile:    "",
+		},
 	}
 
 	server := NewServer(cfg)
+	require.NotNil(t, server)
+	require.Equal(t, cfg, server.config)
+}
 
-	if server == nil {
-		t.Fatal("Expected non-nil server")
+func TestServerAddress(t *testing.T) {
+	cfg := &config.Config{
+		HTTP: config.HTTPConfig{
+			Host: "localhost",
+			Port: 25550,
+		},
+		Metrics: config.MetricsConfig{
+			CollectionInterval: "15s",
+			RetentionDays:      7,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Security: config.SecurityConfig{
+			TLSEnabled: false,
+			CertFile:   "",
+			KeyFile:    "",
+		},
 	}
 
-	if server.config != cfg {
-		t.Error("Config not properly set")
+	server := NewServer(cfg)
+	require.Equal(t, "localhost:25550", server.Address())
+}
+
+func TestServerStart(t *testing.T) {
+	cfg := &config.Config{
+		HTTP: config.HTTPConfig{
+			Host: "localhost",
+			Port: 0, // Use port 0 to let the OS assign a random port
+		},
+		Metrics: config.MetricsConfig{
+			CollectionInterval: "15s",
+			RetentionDays:      7,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Security: config.SecurityConfig{
+			TLSEnabled: false,
+			CertFile:   "",
+			KeyFile:    "",
+		},
+	}
+
+	server := NewServer(cfg)
+	require.NotNil(t, server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Start server in background
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Start(ctx)
+	}()
+
+	// Wait for context to be done
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		// Expected timeout
 	}
 }

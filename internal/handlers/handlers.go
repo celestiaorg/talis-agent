@@ -72,7 +72,12 @@ func (h *Handler) HandlePayload(c *fiber.Ctx) error {
 		})
 	}
 
-	payloadPath := filepath.Join("/etc/talis-agent", "payload")
+	payloadDir := os.Getenv("TALIS_PAYLOAD_DIR")
+	if payloadDir == "" {
+		payloadDir = "/etc/talis-agent"
+	}
+
+	payloadPath := filepath.Join(payloadDir, "payload")
 	if err := os.WriteFile(payloadPath, payload, 0644); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

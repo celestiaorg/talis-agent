@@ -10,9 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
-
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/celestiaorg/talis-agent/internal/config"
 	"github.com/celestiaorg/talis-agent/internal/logging"
@@ -36,34 +33,33 @@ func NewServer(cfg *config.Config) *Server {
 }
 
 // Start starts the HTTP server
-func (s *Server) Start() error {
-	// Set up routes
-	mux := http.NewServeMux()
-	mux.HandleFunc("/payload", s.handlePayload)
-	mux.HandleFunc("/commands", s.handleCommands)
-	mux.Handle("/metrics", promhttp.Handler()) // Add Prometheus metrics endpoint
-
-	// Create server with configured port
+func (s *Server) Start(ctx context.Context) error {
+	addr := fmt.Sprintf("%s:%d", s.config.HTTP.Host, s.config.HTTP.Port)
 	s.srv = &http.Server{
-		Addr:              fmt.Sprintf(":%d", s.config.HTTPPort),
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
+		Addr: addr,
 	}
 
-	logging.Info().Int("port", s.config.HTTPPort).Msg("Starting HTTP server")
-	if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("server error: %w", err)
+	logging.Info().Str("address", addr).Msg("Starting HTTP server")
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- fmt.Errorf("server error: %w", err)
+		}
+		close(errCh)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return s.srv.Shutdown(context.Background())
 	}
-	return ErrServerClosed
 }
 
-// Shutdown gracefully shuts down the server
-func (s *Server) Shutdown(ctx context.Context) error {
-	if s.srv != nil {
-		logging.Info().Msg("Shutting down HTTP server")
-		return s.srv.Shutdown(ctx)
-	}
-	return nil
+// Address returns the server's address
+func (s *Server) Address() string {
+	return fmt.Sprintf("%s:%d", s.config.HTTP.Host, s.config.HTTP.Port)
 }
 
 // handlePayload handles POST requests to /payload
@@ -78,17 +74,14 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify token
-	if !s.verifyToken(r) {
-		logging.Warn().
-			Str("path", "/payload").
-			Msg("Unauthorized request")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	// Get payload path from environment variable or use default
+	payloadPath := os.Getenv("TALIS_PAYLOAD_PATH")
+	if payloadPath == "" {
+		payloadPath = "/etc/talis-agent/payload"
 	}
 
 	// Create directory if it doesn't exist
-	dir := filepath.Dir(s.config.Payload.Path)
+	dir := filepath.Dir(payloadPath)
 	// #nosec G301 -- This directory needs to be readable by other processes
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		logging.Error().
@@ -100,11 +93,11 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open file for writing
-	file, err := os.Create(s.config.Payload.Path)
+	file, err := os.Create(payloadPath)
 	if err != nil {
 		logging.Error().
 			Err(err).
-			Str("path", s.config.Payload.Path).
+			Str("path", payloadPath).
 			Msg("Failed to create file")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -122,7 +115,7 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logging.Error().
 			Err(err).
-			Str("path", s.config.Payload.Path).
+			Str("path", payloadPath).
 			Msg("Failed to write payload")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -133,7 +126,7 @@ func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
 
 	logging.Info().
 		Int64("bytes", written).
-		Str("path", s.config.Payload.Path).
+		Str("path", payloadPath).
 		Msg("Payload received and written")
 
 	w.WriteHeader(http.StatusOK)
@@ -159,15 +152,6 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 			Str("path", "/commands").
 			Msg("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Verify token
-	if !s.verifyToken(r) {
-		logging.Warn().
-			Str("path", "/commands").
-			Msg("Unauthorized request")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -203,7 +187,6 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 		logging.Error().
 			Err(err).
 			Str("command", req.Command).
-			Str("output", string(output)).
 			Msg("Command execution failed")
 	} else {
 		logging.Info().
@@ -220,11 +203,4 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-}
-
-// verifyToken verifies the authorization token in the request
-func (s *Server) verifyToken(r *http.Request) bool {
-	auth := r.Header.Get("Authorization")
-	expectedToken := fmt.Sprintf("Bearer %s", s.config.Token)
-	return auth == expectedToken
 }
