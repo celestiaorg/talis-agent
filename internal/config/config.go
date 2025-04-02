@@ -9,6 +9,16 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+var configPaths = []string{
+	"/etc/talis-agent/config.yaml",
+	"config.yaml",
+}
+
+// SetConfigPaths sets the paths to search for config files (for testing only)
+func SetConfigPaths(paths []string) {
+	configPaths = paths
+}
+
 // Config represents the application configuration
 type Config struct {
 	HTTP     HTTPConfig     `yaml:"http"`
@@ -65,11 +75,6 @@ func DefaultConfig() *Config {
 
 // Load loads the configuration from the specified file
 func Load() (*Config, error) {
-	configPaths := []string{
-		"/etc/talis-agent/config.yaml",
-		"config.yaml",
-	}
-
 	var configFile string
 	for _, path := range configPaths {
 		if _, err := os.Stat(path); err == nil {
@@ -96,7 +101,7 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// Save saves the configuration to the specified file
+// Save saves the configuration to a YAML file
 func (c *Config) Save(path string) error {
 	data, err := yaml.Marshal(c)
 	if err != nil {
