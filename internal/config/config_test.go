@@ -2,62 +2,107 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad(t *testing.T) {
-	// Create a temporary config file
-	configContent := `
-api_server: "http://test-server:8080"
-token: "test-token"
-checkin_interval: "5s"
-http_port: 25550
-log_level: "debug"
-metrics:
-  collection_interval: "5s"
-  endpoints:
-    telemetry: "/v1/agent/telemetry"
-    checkin: "/v1/agent/checkin"
-payload:
-  path: "/etc/talis-agent/payload"
-`
-	tmpfile, err := os.CreateTemp("", "config-*.yaml")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
+	// Save the original config paths and restore them after the test
+	origPaths := configPaths
+	defer func() { configPaths = origPaths }()
+
+	// Set empty config paths to ensure we get the default config
+	SetConfigPaths([]string{})
+
+	// Test loading the config (should return default config when no file exists)
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	// Verify default values
+	require.Equal(t, "0.0.0.0", cfg.HTTP.Host)
+	require.Equal(t, 25550, cfg.HTTP.Port)
+	require.Equal(t, "15s", cfg.Metrics.CollectionInterval)
+	require.Equal(t, 7, cfg.Metrics.RetentionDays)
+	require.Equal(t, "info", cfg.Logging.Level)
+	require.Equal(t, "json", cfg.Logging.Format)
+	require.False(t, cfg.Security.TLSEnabled)
+	require.Empty(t, cfg.Security.CertFile)
+	require.Empty(t, cfg.Security.KeyFile)
+}
+
+func TestLoadCustomConfig(t *testing.T) {
+	// Save the original config paths and restore them after the test
+	origPaths := configPaths
+	defer func() { configPaths = origPaths }()
+
+	// Create a test config
+	testCfg := &Config{
+		HTTP: HTTPConfig{
+			Host: "localhost",
+			Port: 8080,
+		},
+		Metrics: MetricsConfig{
+			CollectionInterval: "30s",
+			RetentionDays:      14,
+		},
+		Logging: LoggingConfig{
+			Level:  "debug",
+			Format: "text",
+		},
+		Security: SecurityConfig{
+			TLSEnabled: true,
+			CertFile:   "cert.pem",
+			KeyFile:    "key.pem",
+		},
 	}
+
+	// Create a temporary directory for the test
+	tmpDir, err := os.MkdirTemp("", "talis-agent-test")
+	require.NoError(t, err)
 	defer func() {
-		if err := os.Remove(tmpfile.Name()); err != nil {
-			t.Errorf("Failed to remove temporary file: %v", err)
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("failed to remove temporary directory: %v", err)
 		}
 	}()
 
-	if _, err := tmpfile.Write([]byte(configContent)); err != nil {
-		t.Fatalf("Failed to write config content: %v", err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatalf("Failed to close temp file: %v", err)
-	}
+	// Save the test config
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err = testCfg.Save(configPath)
+	require.NoError(t, err)
 
-	// Test loading valid configuration
-	config, err := Load(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
+	// Set the config path to our test config
+	SetConfigPaths([]string{configPath})
 
-	// Verify configuration values
-	if config.APIServer != "http://test-server:8080" {
-		t.Errorf("Expected APIServer to be 'http://test-server:8080', got '%s'", config.APIServer)
-	}
-	if config.Token != "test-token" {
-		t.Errorf("Expected Token to be 'test-token', got '%s'", config.Token)
-	}
-	if config.HTTPPort != 25550 {
-		t.Errorf("Expected HTTPPort to be 25550, got %d", config.HTTPPort)
-	}
-	if config.CheckinInterval != 5*time.Second {
-		t.Errorf("Expected CheckinInterval to be 5s, got %v", config.CheckinInterval)
-	}
+	// Test loading the config
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	// Verify custom values
+	require.Equal(t, "localhost", cfg.HTTP.Host)
+	require.Equal(t, 8080, cfg.HTTP.Port)
+	require.Equal(t, "30s", cfg.Metrics.CollectionInterval)
+	require.Equal(t, 14, cfg.Metrics.RetentionDays)
+	require.Equal(t, "debug", cfg.Logging.Level)
+	require.Equal(t, "text", cfg.Logging.Format)
+	require.True(t, cfg.Security.TLSEnabled)
+	require.Equal(t, "cert.pem", cfg.Security.CertFile)
+	require.Equal(t, "key.pem", cfg.Security.KeyFile)
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	require.Equal(t, "0.0.0.0", cfg.HTTP.Host)
+	require.Equal(t, 25550, cfg.HTTP.Port)
+	require.Equal(t, "15s", cfg.Metrics.CollectionInterval)
+	require.Equal(t, 7, cfg.Metrics.RetentionDays)
+	require.Equal(t, "info", cfg.Logging.Level)
+	require.Equal(t, "json", cfg.Logging.Format)
+	require.False(t, cfg.Security.TLSEnabled)
+	require.Empty(t, cfg.Security.CertFile)
+	require.Empty(t, cfg.Security.KeyFile)
 }
 
 func TestValidateConfig(t *testing.T) {
@@ -69,34 +114,84 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				APIServer: "http://localhost:8080",
-				Token:     "valid-token",
-				HTTPPort:  25550,
+				HTTP: HTTPConfig{
+					Host: "localhost",
+					Port: 25550,
+				},
+				Metrics: MetricsConfig{
+					CollectionInterval: "15s",
+					RetentionDays:      7,
+				},
+				Logging: LoggingConfig{
+					Level:  "info",
+					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
+				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "missing api server",
-			config: Config{
-				Token:    "valid-token",
-				HTTPPort: 25550,
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing token",
-			config: Config{
-				APIServer: "http://localhost:8080",
-				HTTPPort:  25550,
-			},
-			wantErr: true,
-		},
-		{
 			name: "invalid port",
 			config: Config{
-				APIServer: "http://localhost:8080",
-				Token:     "valid-token",
-				HTTPPort:  70000,
+				HTTP: HTTPConfig{
+					Host: "localhost",
+					Port: 70000,
+				},
+				Metrics: MetricsConfig{
+					CollectionInterval: "15s",
+					RetentionDays:      7,
+				},
+				Logging: LoggingConfig{
+					Level:  "info",
+					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid collection interval",
+			config: Config{
+				HTTP: HTTPConfig{
+					Host: "localhost",
+					Port: 25550,
+				},
+				Metrics: MetricsConfig{
+					CollectionInterval: "invalid",
+					RetentionDays:      7,
+				},
+				Logging: LoggingConfig{
+					Level:  "info",
+					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid log level",
+			config: Config{
+				HTTP: HTTPConfig{
+					Host: "localhost",
+					Port: 25550,
+				},
+				Metrics: MetricsConfig{
+					CollectionInterval: "15s",
+					RetentionDays:      7,
+				},
+				Logging: LoggingConfig{
+					Level:  "invalid",
+					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
+				},
 			},
 			wantErr: true,
 		},
@@ -104,9 +199,9 @@ func TestValidateConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateConfig(&tt.config)
+			err := tt.config.Validate()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Config.Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
