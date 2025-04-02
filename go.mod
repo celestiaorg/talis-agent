@@ -2,10 +2,10 @@ module github.com/celestiaorg/talis-agent
 
 go 1.23.0
 
-toolchain go1.23.5
+toolchain go1.24.1
 
 require (
-	github.com/gofiber/fiber/v2 v2.52.0
+	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/prometheus/client_golang v1.21.1
 	github.com/rs/zerolog v1.34.0
 	github.com/shirou/gopsutil/v3 v3.24.5
