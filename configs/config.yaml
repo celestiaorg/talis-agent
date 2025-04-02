@@ -16,4 +16,3 @@ security:
   tls_enabled: false   # Enable HTTPS
   cert_file: ""        # Path to TLS certificate
   key_file: ""         # Path to TLS private key
-  
