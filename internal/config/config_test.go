@@ -95,7 +95,7 @@ func TestValidateConfig(t *testing.T) {
 			config: Config{
 				HTTP: HTTPConfig{
 					Host: "localhost",
-					Port: 70000, // Invalid port number
+					Port: 70000,
 				},
 				Metrics: MetricsConfig{
 					CollectionInterval: "15s",
@@ -104,6 +104,9 @@ func TestValidateConfig(t *testing.T) {
 				Logging: LoggingConfig{
 					Level:  "info",
 					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
 				},
 			},
 			wantErr: true,
@@ -116,12 +119,15 @@ func TestValidateConfig(t *testing.T) {
 					Port: 25550,
 				},
 				Metrics: MetricsConfig{
-					CollectionInterval: "invalid", // Invalid duration
+					CollectionInterval: "invalid",
 					RetentionDays:      7,
 				},
 				Logging: LoggingConfig{
 					Level:  "info",
 					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
 				},
 			},
 			wantErr: true,
@@ -138,8 +144,11 @@ func TestValidateConfig(t *testing.T) {
 					RetentionDays:      7,
 				},
 				Logging: LoggingConfig{
-					Level:  "invalid", // Invalid log level
+					Level:  "invalid",
 					Format: "json",
+				},
+				Security: SecurityConfig{
+					TLSEnabled: false,
 				},
 			},
 			wantErr: true,

@@ -2,9 +2,9 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v2"
 )
@@ -84,7 +84,7 @@ func Load() (*Config, error) {
 		return cfg, nil
 	}
 
-	data, err := ioutil.ReadFile(configFile)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -108,8 +108,30 @@ func (c *Config) Save(path string) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	if err := ioutil.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// Validate checks if the configuration is valid
+func (c *Config) Validate() error {
+	// Validate HTTP port
+	if c.HTTP.Port < 1 || c.HTTP.Port > 65535 {
+		return fmt.Errorf("invalid port number: %d", c.HTTP.Port)
+	}
+
+	// Validate metrics collection interval
+	if _, err := time.ParseDuration(c.Metrics.CollectionInterval); err != nil {
+		return fmt.Errorf("invalid collection interval: %s", c.Metrics.CollectionInterval)
+	}
+
+	// Validate log level
+	switch c.Logging.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("invalid log level: %s", c.Logging.Level)
 	}
 
 	return nil

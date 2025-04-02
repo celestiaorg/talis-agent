@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/celestiaorg/talis-agent/internal/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/celestiaorg/talis-agent/internal/config"
 )
 
 func TestHandlePayload(t *testing.T) {
