@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/celestiaorg/talis-agent/internal/config"
 	"github.com/celestiaorg/talis-agent/internal/logging"
-	"github.com/celestiaorg/talis-agent/internal/metrics"
 )
 
 // ErrServerClosed is returned by the Server's Start method after a call to Shutdown
@@ -26,20 +25,37 @@ type Server struct {
 }
 
 // NewServer creates a new HTTP server
-func NewServer(cfg *config.Config) *Server {
+func NewServer(config *config.Config) *Server {
 	return &Server{
-		config: cfg,
+		config: config,
 	}
+}
+
+// Address returns the server's address
+func (s *Server) Address() string {
+	return fmt.Sprintf("%s:%d", s.config.HTTP.Host, s.config.HTTP.Port)
 }
 
 // Start starts the HTTP server
 func (s *Server) Start(ctx context.Context) error {
-	addr := fmt.Sprintf("%s:%d", s.config.HTTP.Host, s.config.HTTP.Port)
+	mux := http.NewServeMux()
+
+	// Register routes
+	mux.HandleFunc("/alive", s.handleHealthCheck)
+	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/ip", s.handleIP)
+
 	s.srv = &http.Server{
-		Addr: addr,
+		Addr:              s.Address(),
+		Handler:           mux,
+		ReadHeaderTimeout: 20 * time.Second, // Prevent slow HTTP header attacks
+		ReadTimeout:       1 * time.Minute,  // Maximum duration for reading entire request
+		WriteTimeout:      2 * time.Minute,  // Maximum duration for writing response
+		IdleTimeout:       2 * time.Minute,  // Maximum duration to wait for the next request
+		MaxHeaderBytes:    1 << 20,          // Maximum size of request headers (1MB)
 	}
 
-	logging.Info().Str("address", addr).Msg("Starting HTTP server")
+	logging.Info().Str("address", s.Address()).Msg("Starting HTTP server")
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -53,153 +69,69 @@ func (s *Server) Start(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		return s.srv.Shutdown(context.Background())
-	}
-}
+		// Create a timeout context for shutdown
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-// Address returns the server's address
-func (s *Server) Address() string {
-	return fmt.Sprintf("%s:%d", s.config.HTTP.Host, s.config.HTTP.Port)
-}
-
-// handlePayload handles POST requests to /payload
-func (s *Server) handlePayload(w http.ResponseWriter, r *http.Request) {
-	// Only allow POST method
-	if r.Method != http.MethodPost {
-		logging.Warn().
-			Str("method", r.Method).
-			Str("path", "/payload").
-			Msg("Method not allowed")
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Get payload path from environment variable or use default
-	payloadPath := os.Getenv("TALIS_PAYLOAD_PATH")
-	if payloadPath == "" {
-		payloadPath = "/etc/talis-agent/payload"
-	}
-
-	// Create directory if it doesn't exist
-	dir := filepath.Dir(payloadPath)
-	// #nosec G301 -- This directory needs to be readable by other processes
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		logging.Error().
-			Err(err).
-			Str("directory", dir).
-			Msg("Failed to create directory")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Open file for writing
-	file, err := os.Create(payloadPath)
-	if err != nil {
-		logging.Error().
-			Err(err).
-			Str("path", payloadPath).
-			Msg("Failed to create file")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			logging.Error().
-				Err(err).
-				Msg("Failed to close file")
+		// Attempt graceful shutdown
+		if err := s.srv.Shutdown(shutdownCtx); err != nil {
+			// If shutdown times out, force close
+			logging.Error().Err(err).Msg("Server shutdown timed out, forcing close")
+			return s.srv.Close()
 		}
-	}()
-
-	// Copy request body to file and count bytes
-	written, err := io.Copy(file, r.Body)
-	if err != nil {
-		logging.Error().
-			Err(err).
-			Str("path", payloadPath).
-			Msg("Failed to write payload")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		return nil
 	}
-
-	// Record metrics
-	metrics.GetPrometheusMetrics().RecordPayloadReceived(written)
-
-	logging.Info().
-		Int64("bytes", written).
-		Str("path", payloadPath).
-		Msg("Payload received and written")
-
-	w.WriteHeader(http.StatusOK)
 }
 
-// CommandRequest represents a command execution request
-type CommandRequest struct {
-	Command string `json:"command"`
-}
-
-// CommandResponse represents a command execution response
-type CommandResponse struct {
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
-}
-
-// handleCommands handles POST requests to /commands
-func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
-	// Only allow POST method
-	if r.Method != http.MethodPost {
-		logging.Warn().
-			Str("method", r.Method).
-			Str("path", "/commands").
-			Msg("Method not allowed")
+func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Parse request body
-	var req CommandRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logging.Error().
-			Err(err).
-			Str("path", "/commands").
-			Msg("Invalid request body")
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		logging.Error().Err(err).Msg("Failed to encode response")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Execute command
-	logging.Debug().
-		Str("command", req.Command).
-		Msg("Executing command")
+	promhttp.Handler().ServeHTTP(w, r)
+}
 
-	// #nosec G204 -- Command execution is a core feature of this endpoint
-	cmd := exec.Command("bash", "-c", req.Command)
-	output, err := cmd.CombinedOutput()
-
-	// Record metrics
-	metrics.GetPrometheusMetrics().RecordCommandExecution(err == nil)
-
-	// Prepare response
-	resp := CommandResponse{
-		Output: string(output),
+func (s *Server) handleIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
+
+	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		resp.Error = err.Error()
-		logging.Error().
-			Err(err).
-			Str("command", req.Command).
-			Msg("Command execution failed")
-	} else {
-		logging.Info().
-			Str("command", req.Command).
-			Msg("Command executed successfully")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	// Send response
+	var ips []string
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				ips = append(ips, ipnet.IP.String())
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logging.Error().
-			Err(err).
-			Msg("Failed to encode response")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string][]string{"ips": ips}); err != nil {
+		logging.Error().Err(err).Msg("Failed to encode response")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}

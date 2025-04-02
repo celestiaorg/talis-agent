@@ -1,13 +1,7 @@
 package http
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,74 +9,6 @@ import (
 
 	"github.com/celestiaorg/talis-agent/internal/config"
 )
-
-func TestHandlePayload(t *testing.T) {
-	// Create a temporary directory for the payload
-	tmpDir, err := os.MkdirTemp("", "talis-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	payloadPath := filepath.Join(tmpDir, "payload")
-	t.Setenv("TALIS_PAYLOAD_PATH", payloadPath)
-
-	cfg := &config.Config{
-		HTTP: config.HTTPConfig{
-			Host: "localhost",
-			Port: 25550,
-		},
-	}
-
-	server := NewServer(cfg)
-	require.NotNil(t, server)
-
-	// Create a test request
-	payload := []byte("test payload")
-	req := httptest.NewRequest(http.MethodPost, "/payload", bytes.NewReader(payload))
-	w := httptest.NewRecorder()
-
-	// Handle the request
-	server.handlePayload(w, req)
-
-	// Check response
-	require.Equal(t, http.StatusOK, w.Code)
-
-	// Verify the file was written
-	content, err := os.ReadFile(payloadPath)
-	require.NoError(t, err)
-	require.Equal(t, payload, content)
-}
-
-func TestHandleCommands(t *testing.T) {
-	cfg := &config.Config{
-		HTTP: config.HTTPConfig{
-			Host: "localhost",
-			Port: 25550,
-		},
-	}
-
-	server := NewServer(cfg)
-	require.NotNil(t, server)
-
-	// Create a test request
-	cmdReq := CommandRequest{Command: "echo 'test'"}
-	body, err := json.Marshal(cmdReq)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/commands", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-
-	// Handle the request
-	server.handleCommands(w, req)
-
-	// Check response
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp CommandResponse
-	err = json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
-	require.Equal(t, "test\n", resp.Output)
-	require.Empty(t, resp.Error)
-}
 
 func TestNewServer(t *testing.T) {
 	cfg := &config.Config{

@@ -95,10 +95,4 @@ func setupRoutes(app *fiber.App, h *handlers.Handler) {
 
 	// IP endpoint
 	app.Get("/ip", h.GetIP)
-
-	// Payload endpoint
-	app.Post("/payload", h.HandlePayload)
-
-	// Commands endpoint
-	app.Post("/commands", h.ExecuteCommand)
 }

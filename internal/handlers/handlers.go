@@ -2,9 +2,6 @@ package handlers
 
 import (
 	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -13,12 +10,12 @@ import (
 	"github.com/celestiaorg/talis-agent/internal/metrics"
 )
 
-// Handler contains dependencies for HTTP handlers
+// Handler handles HTTP requests
 type Handler struct {
 	collector *metrics.Collector
 }
 
-// NewHandler creates a new Handler instance
+// NewHandler creates a new Handler
 func NewHandler(collector *metrics.Collector) *Handler {
 	return &Handler{
 		collector: collector,
@@ -63,65 +60,15 @@ func (h *Handler) GetIP(c *fiber.Ctx) error {
 	})
 }
 
-// HandlePayload handles the /payload endpoint
-func (h *Handler) HandlePayload(c *fiber.Ctx) error {
-	payload := c.Body()
-	if len(payload) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "empty payload",
-		})
-	}
-
-	payloadDir := os.Getenv("TALIS_PAYLOAD_DIR")
-	if payloadDir == "" {
-		payloadDir = "/etc/talis-agent"
-	}
-
-	payloadPath := filepath.Join(payloadDir, "payload")
-	if err := os.WriteFile(payloadPath, payload, 0644); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.JSON(fiber.Map{
-		"status": "payload stored successfully",
-	})
-}
-
-// ExecuteCommand handles the /commands endpoint
-func (h *Handler) ExecuteCommand(c *fiber.Ctx) error {
-	command := string(c.Body())
-	if command == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "empty command",
-		})
-	}
-
-	cmd := exec.Command("bash", "-c", command)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":  err.Error(),
-			"output": string(output),
-		})
-	}
-
-	return c.JSON(fiber.Map{
-		"output": string(output),
-	})
-}
-
-// Endpoints handles the / endpoint and returns available endpoints
+// Endpoints returns a list of available endpoints
 func (h *Handler) Endpoints(c *fiber.Ctx) error {
+	endpoints := []string{
+		"/metrics",
+		"/alive",
+		"/ip",
+	}
+
 	return c.JSON(fiber.Map{
-		"endpoints": []string{
-			"/",
-			"/alive",
-			"/metrics",
-			"/ip",
-			"/payload",
-			"/commands",
-		},
+		"endpoints": endpoints,
 	})
 }

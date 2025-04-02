@@ -61,7 +61,11 @@ func TestLoadCustomConfig(t *testing.T) {
 	// Create a temporary directory for the test
 	tmpDir, err := os.MkdirTemp("", "talis-agent-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Save the test config
 	configPath := filepath.Join(tmpDir, "config.yaml")
