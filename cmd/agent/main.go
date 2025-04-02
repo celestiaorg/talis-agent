@@ -84,6 +84,9 @@ func main() {
 }
 
 func setupRoutes(app *fiber.App, h *handlers.Handler) {
+	// Get the commands info
+	app.Get("/", h.Endpoints)
+
 	// Health check endpoint
 	app.Get("/alive", h.HealthCheck)
 

@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"io/ioutil"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -73,7 +73,7 @@ func (h *Handler) HandlePayload(c *fiber.Ctx) error {
 	}
 
 	payloadPath := filepath.Join("/etc/talis-agent", "payload")
-	if err := ioutil.WriteFile(payloadPath, payload, 0644); err != nil {
+	if err := os.WriteFile(payloadPath, payload, 0644); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -104,5 +104,19 @@ func (h *Handler) ExecuteCommand(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"output": string(output),
+	})
+}
+
+// Endpoints handles the / endpoint and returns available endpoints
+func (h *Handler) Endpoints(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"endpoints": []string{
+			"/",
+			"/alive",
+			"/metrics",
+			"/ip",
+			"/payload",
+			"/commands",
+		},
 	})
 }
